@@ -7,7 +7,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 
 users_db = {}
 
-def get_user(user_id, first_name="Пользователь"):
+def get_user(user_id):
     if user_id not in users_db:
         users_db[user_id] = {
             "balance": 0.0,
@@ -17,6 +17,10 @@ def get_user(user_id, first_name="Пользователь"):
 
 def get_status(user):
     return "✅ Активен" if user["numbers_rented"] >= 1 else "❌ Неактивен"
+
+def esc(text):
+    """Экранирует спецсимволы HTML"""
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 def main_menu():
     markup = InlineKeyboardMarkup()
@@ -39,28 +43,28 @@ def back_btn():
     return markup
 
 def welcome_text(tg_user, user):
-    name     = tg_user.first_name or "—"
-    username = f"@{tg_user.username}" if tg_user.username else "—"
+    name     = esc(tg_user.first_name or "—")
+    username = f"@{esc(tg_user.username)}" if tg_user.username else "—"
     status   = get_status(user)
     return (
-        f"🏠 *Аренда MAX*\n\n"
-        f"👤 Имя:       *{name}*\n"
-        f"🆔 ID:        `{tg_user.id}`\n"
-        f"📎 Username:  {username}\n"
-        f"💵 Баланс:    `${user['balance']:.2f}`\n"
-        f"📱 Сдано:     {user['numbers_rented']} номеров\n"
-        f"🔖 Статус:    {status}\n\n"
+        f"🏠 <b>Аренда MAX</b>\n\n"
+        f"👤 Имя:      <b>{name}</b>\n"
+        f"🆔 ID:       <code>{tg_user.id}</code>\n"
+        f"📎 Username: {username}\n"
+        f"💵 Баланс:   <code>${user['balance']:.2f}</code>\n"
+        f"📱 Сдано:    {user['numbers_rented']} номеров\n"
+        f"🔖 Статус:   {status}\n\n"
         f"Выберите раздел 👇"
     )
 
 
 @bot.message_handler(commands=["start", "menu"])
 def start(message):
-    user = get_user(message.from_user.id, message.from_user.first_name)
+    user = get_user(message.from_user.id)
     bot.send_message(
         message.chat.id,
         welcome_text(message.from_user, user),
-        parse_mode="Markdown",
+        parse_mode="HTML",
         reply_markup=main_menu()
     )
 
@@ -76,7 +80,7 @@ def callback_handler(call):
         bot.edit_message_text(
             welcome_text(call.from_user, user),
             chat_id, msg_id,
-            parse_mode="Markdown",
+            parse_mode="HTML",
             reply_markup=main_menu()
         )
 
