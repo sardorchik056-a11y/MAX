@@ -1,6 +1,4 @@
 import telebot
-import requests
-import io
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # =============================================
@@ -9,22 +7,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 BOT_TOKEN = "8918670807:AAHFkCF8kemTCIVlbeLfmRkPUd6gk3wdKVo"
 
 # =============================================
-#   🖼️ ИЗОБРАЖЕНИЕ ДЛЯ МЕНЮ
-# =============================================
-MENU_IMAGE_URL = "https://iimg.su/i/nZaYpO"
-
-def load_menu_image() -> bytes:
-    """Скачивает картинку один раз при старте и кэширует в памяти"""
-    headers = {"User-Agent": "Mozilla/5.0"}
-    resp = requests.get(MENU_IMAGE_URL, headers=headers, timeout=10)
-    resp.raise_for_status()
-    return resp.content
-
-MENU_IMAGE_BYTES: bytes = b""   # заполняется в __main__
-MENU_IMAGE_FILE_ID: str  = ""   # после первой отправки Telegram вернёт file_id
-
-# =============================================
-#   🎨 КАСТОМНЫЕ ЭМОДЗИ ID
+#   🎨 КАСТОМНЫЕ ЭМОДЗИ ID — вставь свои
 # =============================================
 EMOJI_PROFILE  = "5260399854500191689"
 EMOJI_BALANCE  = "5258204546391351475"
@@ -33,7 +16,15 @@ EMOJI_HISTORY  = "6030776052345737530"
 EMOJI_STATS    = "5258330865674494479"
 EMOJI_BACK     = "6039539366177541657"
 
+# =============================================
+#   🖼️ BANNER FILE_ID — вставь после /getfileid
+# =============================================
+BANNER_FILE_ID = None  # <- сюда вставишь полученный file_id
+
 bot = telebot.TeleBot(BOT_TOKEN)
+
+# Храним ID пользователей, которые вызвали /getfileid
+waiting_for_photo = set()
 
 users_db = {}
 
@@ -72,7 +63,7 @@ def main_menu():
 
 def back_btn():
     markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("◀️ Назад", callback_data="back_menu", icon_custom_emoji_id=EMOJI_BACK))
+    markup.row(InlineKeyboardButton("Назад", callback_data="back_menu", icon_custom_emoji_id=EMOJI_BACK))
     return markup
 
 def welcome_text(tg_user, user):
@@ -87,55 +78,64 @@ def welcome_text(tg_user, user):
         f'├ <tg-emoji emoji-id="5258204546391351475">🎟</tg-emoji> Баланс: <code>${user["balance"]:.2f}</code>\n'
         f'├ <tg-emoji emoji-id="5449407131675558756">🎟</tg-emoji> Сдано: {user["numbers_rented"]} номеров\n'
         f'├ <tg-emoji emoji-id="5258185631355378853">🎟</tg-emoji> Статус: {get_status(user)}\n'
-        f"╰─────────────────\n"
-    )
-
-
-def delete_and_send_menu(chat_id, msg_id, tg_user, user):
-    """Удаляет старое сообщение и отправляет новое с изображением и меню"""
-    try:
-        bot.delete_message(chat_id, msg_id)
-    except Exception:
-        pass
-    bot.send_photo(
-        chat_id,
-        photo=MENU_IMAGE_URL,
-        caption=welcome_text(tg_user, user),
-        parse_mode="HTML",
-        reply_markup=main_menu()
-    )
-
-def delete_and_send_section(chat_id, msg_id, text):
-    """Удаляет старое сообщение и отправляет новое для раздела"""
-    try:
-        bot.delete_message(chat_id, msg_id)
-    except Exception:
-        pass
-    bot.send_message(
-        chat_id,
-        text,
-        reply_markup=back_btn()
+        f"╰─────────────────"
     )
 
 
 # =============================================
-#   /start  /menu
+#   📸 /getfileid — получить file_id баннера
+# =============================================
+@bot.message_handler(commands=["getfileid"])
+def cmd_getfileid(message):
+    waiting_for_photo.add(message.from_user.id)
+    bot.send_message(
+        message.chat.id,
+        "📸 Теперь отправь фото — я верну его <b>file_id</b>",
+        parse_mode="HTML"
+    )
+
+
+@bot.message_handler(content_types=["photo"])
+def handle_photo(message):
+    user_id = message.from_user.id
+
+    if user_id in waiting_for_photo:
+        waiting_for_photo.discard(user_id)
+        file_id = message.photo[-1].file_id  # берём самое высокое качество
+        bot.send_message(
+            message.chat.id,
+            f"✅ Твой <b>file_id</b>:\n\n<code>{file_id}</code>\n\n"
+            f"Скопируй и вставь в код в переменную <code>BANNER_FILE_ID</code>",
+            parse_mode="HTML"
+        )
+    # если не в режиме ожидания — просто игнорируем фото
+
+
+# =============================================
+#   🚀 /start
 # =============================================
 @bot.message_handler(commands=["start", "menu"])
 def start(message):
     user = get_user(message.from_user.id)
-    bot.send_photo(
-        message.chat.id,
-        photo=MENU_IMAGE_URL,
-        caption=welcome_text(message.from_user, user),
-        parse_mode="HTML",
-        reply_markup=main_menu()
-    )
+    text = welcome_text(message.from_user, user)
+
+    if BANNER_FILE_ID:
+        bot.send_photo(
+            message.chat.id,
+            BANNER_FILE_ID,
+            caption=text,
+            parse_mode="HTML",
+            reply_markup=main_menu()
+        )
+    else:
+        bot.send_message(
+            message.chat.id,
+            text,
+            parse_mode="HTML",
+            reply_markup=main_menu()
+        )
 
 
-# =============================================
-#   CALLBACK HANDLER
-# =============================================
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     bot.answer_callback_query(call.id)
@@ -144,10 +144,44 @@ def callback_handler(call):
 
     if call.data == "back_menu":
         user = get_user(call.from_user.id)
-        delete_and_send_menu(chat_id, msg_id, call.from_user, user)
+        text = welcome_text(call.from_user, user)
+
+        if BANNER_FILE_ID:
+            # Если сообщение было с фото — редактируем медиа
+            try:
+                from telebot.types import InputMediaPhoto
+                bot.edit_message_media(
+                    InputMediaPhoto(BANNER_FILE_ID, caption=text, parse_mode="HTML"),
+                    chat_id, msg_id,
+                    reply_markup=main_menu()
+                )
+            except Exception:
+                bot.edit_message_caption(
+                    caption=text,
+                    chat_id=chat_id,
+                    message_id=msg_id,
+                    parse_mode="HTML",
+                    reply_markup=main_menu()
+                )
+        else:
+            bot.edit_message_text(
+                text,
+                chat_id, msg_id,
+                parse_mode="HTML",
+                reply_markup=main_menu()
+            )
 
     elif call.data in ("profile", "balance", "submit_number", "history", "statistics"):
-        delete_and_send_section(chat_id, msg_id, "🔧 В разработке")
+        bot.edit_message_text(
+            "🔧 В разработке",
+            chat_id, msg_id,
+            reply_markup=back_btn()
+        ) if not BANNER_FILE_ID else bot.edit_message_caption(
+            caption="🔧 В разработке",
+            chat_id=chat_id,
+            message_id=msg_id,
+            reply_markup=back_btn()
+        )
 
 
 if __name__ == "__main__":
