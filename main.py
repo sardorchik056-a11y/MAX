@@ -19,7 +19,7 @@ EMOJI_BACK     = "6039539366177541657"
 # =============================================
 #   🖼️ BANNER FILE_ID — вставь после /getfileid
 # =============================================
-BANNER_FILE_ID = "AgACAgIAAxkBAAMWagQtQeFokgfxQbirNpXtQbkY1FIAAgITaxs1GSBImV6p_jutvD4BAAMCAAN5AAM7BA"  # <- сюда вставишь полученный file_id
+BANNER_FILE_ID = "AgACAgIAAxkBAAMeagQukWF_Zj77_eYNPXcEywJNg0EAAg4Taxs1GSBI3gdnW__fsXUBAAMCAAN5AAM7BA"  # <- сюда вставишь полученный file_id
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
