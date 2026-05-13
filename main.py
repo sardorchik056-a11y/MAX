@@ -4,7 +4,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMedia
 # =============================================
 #   🔑 ТОКЕН БОТА
 # =============================================
-BOT_TOKEN = "8610804137:AAFkdrZIDRAsdhn4fZP51-rcnrI5C8d4xpg"
+BOT_TOKEN = "8918670807:AAHFkCF8kemTCIVlbeLfmRkPUd6gk3wdKVo"
 
 # =============================================
 #   👑 ADMIN ID — вставь свой Telegram ID
@@ -124,7 +124,7 @@ def balance_text(user):
         f"╭─────────────────────\n"
         f"├ <b>{em(EMOJI_BALANCE,'💰')} <b>Ваш баланс</b>\n"
         f"├\n"
-        f'├ <tg-emoji emoji-id="5904462880941545555">🎟</tg-emoji> Доступно: <b>${user['balance']:.2f}</b>\n'
+        f'├ <tg-emoji emoji-id="5904462880941545555">🎟</tg-emoji> Доступно: <b>${user["balance"]:.2f}</b>\n'
         f"├\n"
         f'├ <tg-emoji emoji-id="6030776052345737530">🎟</tg-emoji> <b>Последние операции:</b>\n'
         f"{history_lines}</b>"
@@ -272,7 +272,7 @@ def cmd_admin(message):
         f"╭─────────────────────\n"
         f"├ {em(EMOJI_ADMIN,'👑')} <b>Панель администратора</b>\n"
         f"├\n"
-        f'├ <tg-emoji emoji-id="5904462880941545555">🎟</tg-emoji> Выплата за номер: <b>${settings['payout']:.2f}</b>\n'
+        f'├ <tg-emoji emoji-id="5904462880941545555">🎟</tg-emoji> Выплата за номер: <b>${settings["payout"]:.2f}</b>\n'
         f'├ <tg-emoji emoji-id="5258513401784573443">🎟</tg-emoji> Пользователей: <b>{len(users_db)}</b>\n'
         f"╰─────────────────────",
         parse_mode="HTML",
@@ -622,8 +622,8 @@ def callback_handler(call):
             f'├ <tg-emoji emoji-id="5260399854500191689">🎟</tg-emoji> Имя: {name}\n'
             f'├ <tg-emoji emoji-id="5323442290708985472">🎟</tg-emoji> Username: {username}\n'
             f'├ <tg-emoji emoji-id="5282843764451195532">🎟</tg-emoji> ID: <code>{uid}</code>\n'
-            f'├ <tg-emoji emoji-id="5440621591387980068">🎟</tg-emoji> Дата: {datetime.date.today().strftime('%d.%m.%Y')}\n'
-            f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> Выплата: <b>${settings['payout']:.2f}</b>\n'
+            f'├ <tg-emoji emoji-id="5440621591387980068">🎟</tg-emoji> Дата: {datetime.date.today().strftime("%d.%m.%Y")}\n'
+            f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> Выплата: <b>${settings["payout"]:.2f}</b>\n'
             f"╰─────────────────────"
         )
         try:
@@ -675,8 +675,8 @@ def callback_handler(call):
                 f"╭─────────────────────\n"
                 f'├ <tg-emoji emoji-id="5258215846450305872">🎟</tg-emoji> <b>Заявка принята!</b>\n'
                 f"├\n"
-                f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> Начислено: <b>${settings['payout']:.2f}</b>\n'
-                f'├ <tg-emoji emoji-id="5258204546391351475">🎟</tg-emoji> Ваш баланс: <b>${u['balance']:.2f}</b>\n'
+                f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> Начислено: <b>${settings["payout"]:.2f}</b>\n'
+                f'├ <tg-emoji emoji-id="5258204546391351475">🎟</tg-emoji> Ваш баланс: <b>${u["balance"]:.2f}</b>\n'
                 f"╰─────────────────────",
                 parse_mode="HTML"
             )
