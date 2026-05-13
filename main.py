@@ -10,7 +10,7 @@ BOT_TOKEN = "8918670807:AAHFkCF8kemTCIVlbeLfmRkPUd6gk3wdKVo"
 # =============================================
 #   💎 CRYPTOBOT API TOKEN (@CryptoBot -> My Apps)
 # =============================================
-CRYPTOBOT_TOKEN = "552018:AAmEzVekZI0E1Qcpi0ccOxbkOMk01J2Qs2n"   # <- вставь токен CryptoBot
+CRYPTOBOT_TOKEN = "YOUR_CRYPTOBOT_TOKEN_HERE"   # <- вставь токен CryptoBot
 CRYPTOBOT_API   = "https://pay.crypt.bot/api"   # mainnet
 
 # =============================================
@@ -311,6 +311,8 @@ def admin_withdraw_btn(req_id: int):
         InlineKeyboardButton("❌ Отклонить", callback_data=f"wd_reject_{req_id}"),
     )
     return markup
+
+def admin_review_btn(user_id):
     markup = InlineKeyboardMarkup()
     markup.row(
         InlineKeyboardButton("✅Принять",  callback_data=f"approve_{user_id}"),
