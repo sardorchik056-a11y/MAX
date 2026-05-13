@@ -63,12 +63,12 @@ def welcome_text(tg_user, user):
     username = f"@{esc(tg_user.username)}" if tg_user.username else "—"
     return (
         f"╭─────────────────\n"
-        f"├ 👤 <b>{name}</b>\n"
-        f"├ 🆔 ID: <code>{tg_user.id}</code>\n"
-        f"├ 📎 Username: {username}\n\n"
-        f"├ 💵 Баланс: <code>${user['balance']:.2f}</code>\n"
-        f"├ 📱 Сдано: {user['numbers_rented']} номеров\n"
-        f"├ 🔖 Статус: {get_status(user)}\n"
+        f"├ <b><tg-emoji emoji-id="5260399854500191689">🎟</tg-emoji> <b>{name}</b>\n"
+        f"├ <tg-emoji emoji-id="5282843764451195532">🎟</tg-emoji> ID: <code>{tg_user.id}</code>\n"
+        f"├ <tg-emoji emoji-id="5323442290708985472">🎟</tg-emoji> : {username}\n\n"
+        f"├ <tg-emoji emoji-id="5258204546391351475">🎟</tg-emoji> Баланс: <code>${user['balance']:.2f}</code>\n"
+        f"├ <tg-emoji emoji-id="5449407131675558756">🎟</tg-emoji> Сдано: {user['numbers_rented']} номеров\n"
+        f"├ <tg-emoji emoji-id="5258185631355378853">🎟</tg-emoji> Статус: {get_status(user)}</b>\n"
         f"╰─────────────────\n"
     )
 
