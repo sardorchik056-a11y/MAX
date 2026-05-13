@@ -29,7 +29,7 @@ def get_user(user_id):
     return users_db[user_id]
 
 def get_status(user):
-    return "✅ Активен" if user["numbers_rented"] >= 1 else "❌ Неактивен"
+    return "Активен" if user["numbers_rented"] >= 1 else "Неактивен"
 
 def esc(text):
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
