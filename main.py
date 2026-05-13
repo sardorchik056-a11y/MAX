@@ -124,9 +124,9 @@ def balance_text(user):
         f"╭─────────────────────\n"
         f"├ {em(EMOJI_BALANCE,'💰')} <b>Ваш баланс</b>\n"
         f"├\n"
-        f"├ 💵 Доступно: <b>${user['balance']:.2f}</b>\n"
+        f'├ <tg-emoji emoji-id="5904462880941545555">🎟</tg-emoji> Доступно: <b>${user['balance']:.2f}</b>\n'
         f"├\n"
-        f"├ 📜 <b>Последние операции:</b>\n"
+        f'├ <tg-emoji emoji-id="6030776052345737530">🎟</tg-emoji> <b>Последние операции:</b>\n'
         f"{history_lines}"
         f"╰─────────────────────"
     )
@@ -136,8 +136,8 @@ def queue_text(pos):
         f"╭─────────────────────\n"
         f"├ {em(EMOJI_QUEUE,'🔄')} <b>Вы добавлены в очередь!</b>\n"
         f"├\n"
-        f"├ 📍 Ваша позиция: <b>#{pos}</b>\n"
-        f"├ ⏳ Ожидайте — мы уведомим вас\n"
+        f'├ <tg-emoji emoji-id="6030776052345737530">🎟</tg-emoji> Ваша позиция: <b>#{pos}</b>\n'
+        f'├ <tg-emoji emoji-id="6030537810509828330">🎟</tg-emoji> Ожидайте — мы уведомим вас\n'
         f"├    когда подойдёт ваша очередь\n"
         f"╰─────────────────────"
     )
@@ -148,9 +148,9 @@ def submit_price_text():
         f"╭─────────────────────\n"
         f"├ {em(EMOJI_SUBMIT,'📦')} <b>Сдать номер</b>\n"
         f"├\n"
-        f"├ 💵 Выплата за номер: <b>${amt:.2f}</b>\n"
+        f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> Выплата за номер: <b>${amt:.2f}</b>\n'
         f"├\n"
-        f"├ 📸 Прикрепите QR-код номера\n"
+        f'├ <tg-emoji emoji-id="5258108352008823107">🎟</tg-emoji> Прикрепите QR-код номера\n'
         f"├    и нажмите кнопку ниже\n"
         f"╰─────────────────────"
     )
@@ -165,7 +165,7 @@ def history_text(user):
             body += f"├ {h['date']} {sign}${h['amount']:.2f} — {h['status']}\n"
     return (
         f"╭─────────────────────\n"
-        f"├ {em(EMOJI_HISTORY,'📜')} <b>История операций</b>\n"
+        f'├ <tg-emoji emoji-id="6030776052345737530">🎟</tg-emoji> <b>История операций</b>\n'
         f"├\n"
         f"{body}"
         f"╰─────────────────────"
@@ -181,11 +181,11 @@ def statistics_text():
         f"╭─────────────────────\n"
         f"├ {em(EMOJI_STATS,'📊')} <b>Статистика</b>\n"
         f"├\n"
-        f"├ 👥 Пользователей: <b>{total_users}</b>\n"
-        f"├ 📦 Сдано номеров: <b>{total_rented}</b>\n"
-        f"├ 💰 Выплачено: <b>${total_paid:.2f}</b>\n"
-        f"├ 🔄 В очереди: <b>{queue_count}</b>\n"
-        f"├ ⏳ Ожидают проверки: <b>{pending_count}</b>\n"
+        f'├ <tg-emoji emoji-id="5258513401784573443">🎟</tg-emoji> Пользователей: <b>{total_users}</b>\n'
+        f'├ <tg-emoji emoji-id="5449407131675558756">🎟</tg-emoji> Сдано номеров: <b>{total_rented}</b>\n'
+        f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> Выплачено: <b>${total_paid:.2f}</b>\n'
+        f'├ <tg-emoji emoji-id="6030537810509828330">🎟</tg-emoji> В очереди: <b>{queue_count}</b>\n'
+        f'├ <tg-emoji emoji-id="6039496266180726678">🎟</tg-emoji> Ожидают проверки: <b>{pending_count}</b>\n'
         f"╰─────────────────────"
     )
 
@@ -209,45 +209,45 @@ def main_menu():
 
 def back_btn(target="back_menu"):
     markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("◀️ Назад", callback_data=target, icon_custom_emoji_id=EMOJI_BACK))
+    markup.row(InlineKeyboardButton("Назад", callback_data=target, icon_custom_emoji_id=EMOJI_BACK))
     return markup
 
 def submit_menu():
     """Кнопка 'Прикрепить QR-код'"""
     markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("📷 Прикрепить QR-код", callback_data="attach_qr"))
-    markup.row(InlineKeyboardButton("◀️ Назад", callback_data="back_menu", icon_custom_emoji_id=EMOJI_BACK))
+    markup.row(InlineKeyboardButton("Прикрепить QR-код", callback_data="attach_qr"))
+    markup.row(InlineKeyboardButton("Назад", callback_data="back_menu", icon_custom_emoji_id=EMOJI_BACK))
     return markup
 
 def send_qr_btn():
     """Кнопка 'Отправить' после прикрепления QR"""
     markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("✅ Отправить заявку", callback_data="send_qr"))
-    markup.row(InlineKeyboardButton("🔄 Изменить фото",   callback_data="attach_qr"))
-    markup.row(InlineKeyboardButton("◀️ Назад",           callback_data="back_menu", icon_custom_emoji_id=EMOJI_BACK))
+    markup.row(InlineKeyboardButton("✅Отправить заявку", callback_data="send_qr"))
+    markup.row(InlineKeyboardButton("Изменить QR-код",   callback_data="attach_qr"))
+    markup.row(InlineKeyboardButton("Назад",           callback_data="back_menu", icon_custom_emoji_id=EMOJI_BACK))
     return markup
 
 def admin_review_btn(user_id):
     markup = InlineKeyboardMarkup()
     markup.row(
-        InlineKeyboardButton("✅ Принять",  callback_data=f"approve_{user_id}"),
-        InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{user_id}"),
+        InlineKeyboardButton("✅Принять",  callback_data=f"approve_{user_id}"),
+        InlineKeyboardButton("❌Отклонить", callback_data=f"reject_{user_id}"),
     )
     return markup
 
 def admin_panel_menu():
     markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("📊 Статистика",       callback_data="adm_stats"))
+    markup.row(InlineKeyboardButton("📊Статистика",       callback_data="adm_stats"))
     markup.row(
-        InlineKeyboardButton("🔍 Проверка юзера",  callback_data="adm_check"),
-        InlineKeyboardButton("💰 Выдать баланс",   callback_data="adm_give"),
+        InlineKeyboardButton("🔍Проверка юзера",  callback_data="adm_check"),
+        InlineKeyboardButton("💰Выдать баланс",   callback_data="adm_give"),
     )
     markup.row(
-        InlineKeyboardButton("➖ Снять баланс",    callback_data="adm_take"),
-        InlineKeyboardButton("🔄 Обнулить всех",   callback_data="adm_reset_all"),
+        InlineKeyboardButton("➖Снять баланс",    callback_data="adm_take"),
+        InlineKeyboardButton("🔄Обнулить всех",   callback_data="adm_reset_all"),
     )
-    markup.row(InlineKeyboardButton("📢 Рассылка",         callback_data="adm_broadcast"))
-    markup.row(InlineKeyboardButton("💵 Изменить выплату", callback_data="adm_payout"))
+    markup.row(InlineKeyboardButton("📢Рассылка",         callback_data="adm_broadcast"))
+    markup.row(InlineKeyboardButton("💵Изменить выплату", callback_data="adm_payout"))
     return markup
 
 
@@ -272,8 +272,8 @@ def cmd_admin(message):
         f"╭─────────────────────\n"
         f"├ {em(EMOJI_ADMIN,'👑')} <b>Панель администратора</b>\n"
         f"├\n"
-        f"├ 💵 Выплата за номер: <b>${settings['payout']:.2f}</b>\n"
-        f"├ 👥 Пользователей: <b>{len(users_db)}</b>\n"
+        f'├ <tg-emoji emoji-id="5904462880941545555">🎟</tg-emoji> Выплата за номер: <b>${settings['payout']:.2f}</b>\n'
+        f'├ <tg-emoji emoji-id="5258513401784573443">🎟</tg-emoji> Пользователей: <b>{len(users_db)}</b>\n'
         f"╰─────────────────────",
         parse_mode="HTML",
         reply_markup=admin_panel_menu()
@@ -331,7 +331,7 @@ def handle_photo(message):
             file_id,
             caption=(
                 f"╭─────────────────────\n"
-                f"├ 📸 <b>QR-код получен!</b>\n"
+                f'├ <tg-emoji emoji-id="6039496266180726678">🎟</tg-emoji> <b>QR-код получен!</b>\n'
                 f"├\n"
                 f"├ Проверьте фото и нажмите\n"
                 f"├ <b>«Отправить заявку»</b>\n"
@@ -363,7 +363,7 @@ def handle_text(message):
         count = 0
         for u_id in list(users_db.keys()):
             try:
-                bot.send_message(u_id, f"📢 <b>Сообщение от администратора:</b>\n\n{text}", parse_mode="HTML")
+                bot.send_message(u_id, f"<b>Сообщение от администратора:</b>\n\n{text}", parse_mode="HTML")
                 count += 1
             except Exception:
                 pass
@@ -473,9 +473,9 @@ def handle_text(message):
             bot.send_message(
                 target_id,
                 f"╭─────────────────────\n"
-                f"├ ❌ <b>Ваша заявка отклонена</b>\n"
+                f"├ ❌<b>Ваша заявка отклонена</b>\n"
                 f"├\n"
-                f"├ 📝 Причина: {esc(reason)}\n"
+                f"├ 📝Причина: {esc(reason)}\n"
                 f"╰─────────────────────",
                 parse_mode="HTML"
             )
