@@ -62,14 +62,14 @@ def welcome_text(tg_user, user):
     name     = esc(tg_user.first_name or "—")
     username = f"@{esc(tg_user.username)}" if tg_user.username else "—"
     return (
-        f"🏠 <b>Аренда MAX</b>\n\n"
-        f"👤 Имя:      <b>{name}</b>\n"
-        f"🆔 ID:       <code>{tg_user.id}</code>\n"
-        f"📎 Username: {username}\n"
-        f"💵 Баланс:   <code>${user['balance']:.2f}</code>\n"
-        f"📱 Сдано:    {user['numbers_rented']} номеров\n"
-        f"🔖 Статус:   {get_status(user)}\n\n"
-        f"Выберите раздел 👇"
+        f"╭─────────────────\n"
+        f"├ 👤 <b>{name}</b>\n"
+        f"├ 🆔 ID: <code>{tg_user.id}</code>\n"
+        f"├ 📎 Username: {username}\n\n"
+        f"├ 💵 Баланс: <code>${user['balance']:.2f}</code>\n"
+        f"├ 📱 Сдано: {user['numbers_rented']} номеров\n"
+        f"├ 🔖 Статус: {get_status(user)}\n"
+        f"╰─────────────────\n"
     )
 
 
