@@ -1,7 +1,20 @@
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+# =============================================
+#   🔑 ТОКЕН БОТА
+# =============================================
 BOT_TOKEN = "8918670807:AAHFkCF8kemTCIVlbeLfmRkPUd6gk3wdKVo"
+
+# =============================================
+#   🎨 КАСТОМНЫЕ ЭМОДЗИ ID — вставь свои
+# =============================================
+EMOJI_PROFILE  = "5260399854500191689"  # <- вставь свой ID
+EMOJI_BALANCE  = "5258204546391351475"  # <- вставь свой ID
+EMOJI_SUBMIT   = "5206607081334906820"  # <- вставь свой ID
+EMOJI_HISTORY  = "6030776052345737530"  # <- вставь свой ID
+EMOJI_STATS    = "5258330865674494479"  # <- вставь свой ID
+EMOJI_BACK     = "6039539366177541657"  # <- вставь свой ID
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -19,33 +32,35 @@ def get_status(user):
     return "✅ Активен" if user["numbers_rented"] >= 1 else "❌ Неактивен"
 
 def esc(text):
-    """Экранирует спецсимволы HTML"""
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
+
+# =============================================
+#   🎛️ МЕНЮ С КАСТОМНЫМИ ЭМОДЗИ
+# =============================================
 def main_menu():
     markup = InlineKeyboardMarkup()
     markup.row(
-        InlineKeyboardButton("👤 Профиль",     callback_data="profile"),
-        InlineKeyboardButton("💰 Баланс",      callback_data="balance"),
+        InlineKeyboardButton("Профиль",     callback_data="profile",       icon_custom_emoji_id=EMOJI_PROFILE),
+        InlineKeyboardButton("Баланс",      callback_data="balance",       icon_custom_emoji_id=EMOJI_BALANCE),
     )
     markup.row(
-        InlineKeyboardButton("📱 Сдать номер", callback_data="submit_number"),
+        InlineKeyboardButton("Сдать номер", callback_data="submit_number", icon_custom_emoji_id=EMOJI_SUBMIT),
     )
     markup.row(
-        InlineKeyboardButton("📜 История",     callback_data="history"),
-        InlineKeyboardButton("📊 Статистика",  callback_data="statistics"),
+        InlineKeyboardButton("История",     callback_data="history",       icon_custom_emoji_id=EMOJI_HISTORY),
+        InlineKeyboardButton("Статистика",  callback_data="statistics",    icon_custom_emoji_id=EMOJI_STATS),
     )
     return markup
 
 def back_btn():
     markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("◀️ Назад", callback_data="back_menu"))
+    markup.row(InlineKeyboardButton("Назад", callback_data="back_menu", icon_custom_emoji_id=EMOJI_BACK))
     return markup
 
 def welcome_text(tg_user, user):
     name     = esc(tg_user.first_name or "—")
     username = f"@{esc(tg_user.username)}" if tg_user.username else "—"
-    status   = get_status(user)
     return (
         f"🏠 <b>Аренда MAX</b>\n\n"
         f"👤 Имя:      <b>{name}</b>\n"
@@ -53,7 +68,7 @@ def welcome_text(tg_user, user):
         f"📎 Username: {username}\n"
         f"💵 Баланс:   <code>${user['balance']:.2f}</code>\n"
         f"📱 Сдано:    {user['numbers_rented']} номеров\n"
-        f"🔖 Статус:   {status}\n\n"
+        f"🔖 Статус:   {get_status(user)}\n\n"
         f"Выберите раздел 👇"
     )
 
