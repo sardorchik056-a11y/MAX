@@ -4,7 +4,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMedia
 # =============================================
 #   🔑 ТОКЕН БОТА
 # =============================================
-BOT_TOKEN = "8610804137:AAFkdrZIDRAsdhn4fZP51-rcnrI5C8d4xpg"
+BOT_TOKEN = "8918670807:AAHFkCF8kemTCIVlbeLfmRkPUd6gk3wdKVo"
 
 # =============================================
 #   👑 ADMIN ID — вставь свой Telegram ID
