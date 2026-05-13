@@ -96,18 +96,16 @@ def em(eid, fallback="⭐"):
 def welcome_text(tg_user, user):
     name     = esc(tg_user.first_name or "—")
     username = f"@{esc(tg_user.username)}" if tg_user.username else "—"
-    in_queue = "Да" if tg_user.id in queue else "Нет"
     return (
-        f"╭─────────────────────\n"
-        f"├ {em(EMOJI_CHECK,'👤')} <b>{name}</b>\n"
-        f"├ {em(EMOJI_STATS,'🆔')} ID: <code>{tg_user.id}</code>\n"
-        f"├ {em(EMOJI_RULES,'📛')} Юзернейм: {username}\n"
-        f"├\n"
-        f"├ {em(EMOJI_BALANCE,'💰')} Баланс: <b>${user['balance']:.2f}</b>\n"
-        f"├ {em(EMOJI_SUBMIT,'📦')} Сдано: <b>{user['numbers_rented']} номеров</b>\n"
-        f"├ {em(EMOJI_QUEUE,'🔄')} В очереди: <b>{in_queue}</b>\n"
-        f"├ {em(EMOJI_HISTORY,'📊')} Статус: <b>{get_status(user)}</b>\n"
-        f"╰─────────────────────"
+        f"╭─────────────────\n"
+        f'├ <b><tg-emoji emoji-id="5260399854500191689">🎟</tg-emoji> {name}\n'
+        f'├ <tg-emoji emoji-id="5282843764451195532">🎟</tg-emoji> ID: <code>{tg_user.id}</code>\n'
+        f'├ <tg-emoji emoji-id="5323442290708985472">🎟</tg-emoji> : {username}\n'
+        f'├\n'
+        f'├ <tg-emoji emoji-id="5258204546391351475">🎟</tg-emoji> Баланс: ${user["balance"]:.2f}\n'
+        f'├ <tg-emoji emoji-id="5449407131675558756">🎟</tg-emoji> Сдано: {user["numbers_rented"]} номеров\n'
+        f'├ <tg-emoji emoji-id="5258185631355378853">🎟</tg-emoji> Статус: {get_status(user)}</b>\n'
+        f"╰─────────────────"
     )
 
 def rules_text():
