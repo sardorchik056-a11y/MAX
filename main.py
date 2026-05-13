@@ -44,13 +44,13 @@ pending  = {}       # {user_id: message_id}  — ожидают проверки
 settings = {
     "payout": PAYOUT_AMOUNT,
     "rules": (
-        '<b><tg-emoji emoji-id="6030776052345737530">🎟</tg-emoji> <b>Правила сервиса:</b>\n\n'
+        '<tg-emoji emoji-id="6030776052345737530">🎟</tg-emoji> <b>Правила сервиса:</b>\n\n'
         "├ <b>1.</b> Номер должен быть зарегистрирован на вас\n"
         "├ <b>2.</b> Номер не должен быть заблокирован\n"
         "├ <b>3.</b> QR-код должен быть чётким и читаемым\n"
         "├ <b>4.</b> Одна заявка в день с одного аккаунта\n"
         "├ <b>5.</b> При нарушении — бан без предупреждения\n"
-        "╰ <b>6.</b> Выплата производится после проверки</b>"
+        "╰ <b>6.</b> Выплата производится после проверки"
     )
 }
 
@@ -122,7 +122,7 @@ def balance_text(user):
         history_lines = "├ История пуста\n"
     return (
         f"╭─────────────────────\n"
-        f"├ <b>{em(EMOJI_BALANCE,'💰')} <b>Ваш баланс</b>\n"
+        f"├ <b>{em(EMOJI_BALANCE,'💰')} Ваш баланс</b>\n"
         f"├\n"
         f'├ <tg-emoji emoji-id="5904462880941545555">🎟</tg-emoji> Доступно: <b>${user["balance"]:.2f}</b>\n'
         f"├\n"
@@ -134,7 +134,7 @@ def balance_text(user):
 def queue_text(pos):
     return (
         f"╭─────────────────────\n"
-        f"├ <b>{em(EMOJI_QUEUE,'🔄')} <b>Вы добавлены в очередь!</b>\n"
+        f"├ <b>{em(EMOJI_QUEUE,'🔄')} Вы добавлены в очередь!</b>\n"
         f"├\n"
         f'├ <tg-emoji emoji-id="6030776052345737530">🎟</tg-emoji> Ваша позиция: <b>#{pos}</b>\n'
         f'├ <tg-emoji emoji-id="6030537810509828330">🎟</tg-emoji> Ожидайте — мы уведомим вас\n'
@@ -146,7 +146,7 @@ def submit_price_text():
     amt = settings["payout"]
     return (
         f"╭─────────────────────\n"
-        f"├ <b>{em(EMOJI_SUBMIT,'📦')} <b>Сдать номер</b>\n"
+        f"├ <b>{em(EMOJI_SUBMIT,'📦')} Сдать номер</b>\n"
         f"├\n"
         f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> Выплата за номер: <b>${amt:.2f}</b>\n'
         f"├\n"
@@ -179,7 +179,7 @@ def statistics_text():
     pending_count = len(pending)
     return (
         f"╭─────────────────────\n"
-        f"├ <b>{em(EMOJI_STATS,'📊')} <b>Статистика</b>\n"
+        f"├ <b>{em(EMOJI_STATS,'📊')} Статистика</b>\n"
         f"├\n"
         f'├ <tg-emoji emoji-id="5258513401784573443">🎟</tg-emoji> Пользователей: <b>{total_users}</b>\n'
         f'├ <tg-emoji emoji-id="5449407131675558756">🎟</tg-emoji> Сдано номеров: <b>{total_rented}</b>\n'
@@ -505,8 +505,8 @@ def callback_handler(call):
                                          parse_mode="HTML", reply_markup=markup)
             else:
                 bot.edit_message_text(text, chat_id, msg_id, parse_mode="HTML", reply_markup=markup)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[edit error] {e}")
 
     # =========================================================
     #   ГЛАВНОЕ МЕНЮ
