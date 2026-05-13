@@ -44,13 +44,13 @@ pending  = {}       # {user_id: message_id}  — ожидают проверки
 settings = {
     "payout": PAYOUT_AMOUNT,
     "rules": (
-        "📋 <b>Правила сервиса:</b>\n\n"
+        '<b><tg-emoji emoji-id="6030776052345737530">🎟</tg-emoji> <b>Правила сервиса:</b>\n\n'
         "├ <b>1.</b> Номер должен быть зарегистрирован на вас\n"
         "├ <b>2.</b> Номер не должен быть заблокирован\n"
         "├ <b>3.</b> QR-код должен быть чётким и читаемым\n"
         "├ <b>4.</b> Одна заявка в день с одного аккаунта\n"
         "├ <b>5.</b> При нарушении — бан без предупреждения\n"
-        "╰ <b>6.</b> Выплата производится после проверки"
+        "╰ <b>6.</b> Выплата производится после проверки</b>"
     )
 }
 
@@ -78,7 +78,7 @@ def get_user(user_id):
     return users_db[user_id]
 
 def get_status(user):
-    return "✅ Активен" if user["numbers_rented"] >= 1 else "⏳ Новичок"
+    return "Активен" if user["numbers_rented"] >= 1 else "Неактивен"
 
 def esc(text):
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -122,23 +122,23 @@ def balance_text(user):
         history_lines = "├ История пуста\n"
     return (
         f"╭─────────────────────\n"
-        f"├ {em(EMOJI_BALANCE,'💰')} <b>Ваш баланс</b>\n"
+        f"├ <b>{em(EMOJI_BALANCE,'💰')} <b>Ваш баланс</b>\n"
         f"├\n"
         f'├ <tg-emoji emoji-id="5904462880941545555">🎟</tg-emoji> Доступно: <b>${user['balance']:.2f}</b>\n'
         f"├\n"
         f'├ <tg-emoji emoji-id="6030776052345737530">🎟</tg-emoji> <b>Последние операции:</b>\n'
-        f"{history_lines}"
+        f"{history_lines}</b>"
         f"╰─────────────────────"
     )
 
 def queue_text(pos):
     return (
         f"╭─────────────────────\n"
-        f"├ {em(EMOJI_QUEUE,'🔄')} <b>Вы добавлены в очередь!</b>\n"
+        f"├ <b>{em(EMOJI_QUEUE,'🔄')} <b>Вы добавлены в очередь!</b>\n"
         f"├\n"
         f'├ <tg-emoji emoji-id="6030776052345737530">🎟</tg-emoji> Ваша позиция: <b>#{pos}</b>\n'
         f'├ <tg-emoji emoji-id="6030537810509828330">🎟</tg-emoji> Ожидайте — мы уведомим вас\n'
-        f"├    когда подойдёт ваша очередь\n"
+        f"├    когда подойдёт ваша очередь\n</b>"
         f"╰─────────────────────"
     )
 
@@ -146,12 +146,12 @@ def submit_price_text():
     amt = settings["payout"]
     return (
         f"╭─────────────────────\n"
-        f"├ {em(EMOJI_SUBMIT,'📦')} <b>Сдать номер</b>\n"
+        f"├ <b>{em(EMOJI_SUBMIT,'📦')} <b>Сдать номер</b>\n"
         f"├\n"
         f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> Выплата за номер: <b>${amt:.2f}</b>\n'
         f"├\n"
         f'├ <tg-emoji emoji-id="5258108352008823107">🎟</tg-emoji> Прикрепите QR-код номера\n'
-        f"├    и нажмите кнопку ниже\n"
+        f"├    и нажмите кнопку ниже\n</b>"
         f"╰─────────────────────"
     )
 
@@ -179,13 +179,13 @@ def statistics_text():
     pending_count = len(pending)
     return (
         f"╭─────────────────────\n"
-        f"├ {em(EMOJI_STATS,'📊')} <b>Статистика</b>\n"
+        f"├ <b>{em(EMOJI_STATS,'📊')} <b>Статистика</b>\n"
         f"├\n"
         f'├ <tg-emoji emoji-id="5258513401784573443">🎟</tg-emoji> Пользователей: <b>{total_users}</b>\n'
         f'├ <tg-emoji emoji-id="5449407131675558756">🎟</tg-emoji> Сдано номеров: <b>{total_rented}</b>\n'
         f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> Выплачено: <b>${total_paid:.2f}</b>\n'
         f'├ <tg-emoji emoji-id="6030537810509828330">🎟</tg-emoji> В очереди: <b>{queue_count}</b>\n'
-        f'├ <tg-emoji emoji-id="6039496266180726678">🎟</tg-emoji> Ожидают проверки: <b>{pending_count}</b>\n'
+        f'├ <tg-emoji emoji-id="6039496266180726678">🎟</tg-emoji> Ожидают проверки: <b>{pending_count}</b></b>\n'
         f"╰─────────────────────"
     )
 
@@ -257,7 +257,7 @@ def admin_panel_menu():
 @bot.message_handler(commands=["getfileid"])
 def cmd_getfileid(message):
     waiting_for_photo.add(message.from_user.id)
-    bot.send_message(message.chat.id, "📸 Отправь фото — верну <b>file_id</b>", parse_mode="HTML")
+    bot.send_message(message.chat.id, " Отправь фото — верну <b>file_id</b>", parse_mode="HTML")
 
 
 # =============================================
@@ -591,7 +591,7 @@ def callback_handler(call):
         waiting_for_qr.add(uid)
         edit(
             f"╭─────────────────────\n"
-            f"├ 📸 <b>Отправьте фото QR-кода</b>\n"
+            f'├  <tg-emoji emoji-id="5258108352008823107">🎟</tg-emoji><b>Отправьте фото QR-кода</b>\n'
             f"├\n"
             f"├ Просто прикрепите изображение\n"
             f"├ к этому чату\n"
@@ -617,13 +617,13 @@ def callback_handler(call):
         username = f"@{esc(call.from_user.username)}" if call.from_user.username else "—"
         admin_caption = (
             f"╭─────────────────────\n"
-            f"├ 📦 <b>Новая заявка на сдачу номера</b>\n"
+            f'├ <tg-emoji emoji-id="5258108352008823107">🎟</tg-emoji> <b>Новая заявка на сдачу номера</b>\n'
             f"├\n"
-            f"├ 👤 Имя: {name}\n"
-            f"├ 🔗 Username: {username}\n"
-            f"├ 🆔 ID: <code>{uid}</code>\n"
-            f"├ 📅 Дата: {datetime.date.today().strftime('%d.%m.%Y')}\n"
-            f"├ 💰 Выплата: <b>${settings['payout']:.2f}</b>\n"
+            f'├ <tg-emoji emoji-id="5260399854500191689">🎟</tg-emoji> Имя: {name}\n'
+            f'├ <tg-emoji emoji-id="5323442290708985472">🎟</tg-emoji> Username: {username}\n'
+            f'├ <tg-emoji emoji-id="5282843764451195532">🎟</tg-emoji> ID: <code>{uid}</code>\n'
+            f'├ <tg-emoji emoji-id="5440621591387980068">🎟</tg-emoji> Дата: {datetime.date.today().strftime('%d.%m.%Y')}\n'
+            f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> Выплата: <b>${settings['payout']:.2f}</b>\n'
             f"╰─────────────────────"
         )
         try:
@@ -639,9 +639,9 @@ def callback_handler(call):
 
         edit(
             f"╭─────────────────────\n"
-            f"├ ✅ <b>Заявка отправлена!</b>\n"
+            f'├ <tg-emoji emoji-id="5258043150110301407">🎟</tg-emoji> <b>Заявка отправлена!</b>\n'
             f"├\n"
-            f"├ ⏳ Ожидайте решения администратора\n"
+            f'├ <tg-emoji emoji-id="5440621591387980068">🎟</tg-emoji> Ожидайте решения администратора\n'
             f"├ Мы уведомим вас о результате\n"
             f"╰─────────────────────",
             back_btn()
@@ -673,10 +673,10 @@ def callback_handler(call):
             bot.send_message(
                 target_id,
                 f"╭─────────────────────\n"
-                f"├ ✅ <b>Заявка принята!</b>\n"
+                f'├ <tg-emoji emoji-id="5258215846450305872">🎟</tg-emoji> <b>Заявка принята!</b>\n'
                 f"├\n"
-                f"├ 💰 Начислено: <b>${settings['payout']:.2f}</b>\n"
-                f"├ 💵 Ваш баланс: <b>${u['balance']:.2f}</b>\n"
+                f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> Начислено: <b>${settings['payout']:.2f}</b>\n'
+                f'├ <tg-emoji emoji-id="5258204546391351475">🎟</tg-emoji> Ваш баланс: <b>${u['balance']:.2f}</b>\n'
                 f"╰─────────────────────",
                 parse_mode="HTML"
             )
@@ -686,7 +686,7 @@ def callback_handler(call):
         # Редактируем сообщение у админа
         try:
             bot.edit_message_caption(
-                caption=call.message.caption + f"\n\n✅ <b>ПРИНЯТО</b> — начислено ${settings['payout']:.2f}",
+                caption=call.message.caption + f"\n\n✅<b>ПРИНЯТО</b> — начислено ${settings['payout']:.2f}",
                 chat_id=chat_id, message_id=msg_id, parse_mode="HTML"
             )
         except Exception:
