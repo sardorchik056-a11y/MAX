@@ -10,7 +10,7 @@ BOT_TOKEN = "8918670807:AAHFkCF8kemTCIVlbeLfmRkPUd6gk3wdKVo"
 # =============================================
 #   💎 CRYPTOBOT API TOKEN (@CryptoBot -> My Apps)
 # =============================================
-CRYPTOBOT_TOKEN = "YOUR_CRYPTOBOT_TOKEN_HERE"   # <- вставь токен CryptoBot
+CRYPTOBOT_TOKEN = "552018:AAmEzVekZI0E1Qcpi0ccOxbkOMk01J2Qs2n"   # <- вставь токен CryptoBot
 CRYPTOBOT_API   = "https://pay.crypt.bot/api"   # mainnet
 
 # =============================================
@@ -841,8 +841,12 @@ def callback_handler(call):
                                          parse_mode="HTML", reply_markup=markup)
             else:
                 bot.edit_message_text(text, chat_id, msg_id, parse_mode="HTML", reply_markup=markup)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[edit] ошибка: {e}")
+            try:
+                bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
+            except Exception as e2:
+                print(f"[edit fallback] ошибка: {e2}")
 
     # =========================================================
     #   ГЛАВНОЕ МЕНЮ
@@ -997,9 +1001,29 @@ def callback_handler(call):
                 show_alert=True
             )
             return
-        # Ждём ввода суммы
+        # Ставим состояние ДО edit — чтобы не потерять если edit упадёт
         user_states[uid] = "waiting_withdraw_amount"
-        edit(withdraw_text(user), back_btn("balance"))
+        try:
+            if call.message.photo:
+                bot.edit_message_caption(
+                    caption=withdraw_text(user),
+                    chat_id=chat_id, message_id=msg_id,
+                    parse_mode="HTML", reply_markup=back_btn("balance")
+                )
+            else:
+                bot.edit_message_text(
+                    withdraw_text(user),
+                    chat_id, msg_id,
+                    parse_mode="HTML", reply_markup=back_btn("balance")
+                )
+        except Exception as e:
+            print(f"[withdraw edit] ошибка: {e}")
+            bot.send_message(
+                chat_id,
+                withdraw_text(user),
+                parse_mode="HTML",
+                reply_markup=back_btn("balance")
+            )
 
     # =========================================================
     #   ВЫВОД — ПОДТВЕРЖДЕНИЕ (callback после ввода суммы)
