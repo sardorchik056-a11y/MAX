@@ -1,4 +1,6 @@
 import telebot
+import requests
+import io
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # =============================================
@@ -10,6 +12,16 @@ BOT_TOKEN = "8918670807:AAHFkCF8kemTCIVlbeLfmRkPUd6gk3wdKVo"
 #   🖼️ ИЗОБРАЖЕНИЕ ДЛЯ МЕНЮ
 # =============================================
 MENU_IMAGE_URL = "https://iimg.su/i/nZaYpO"
+
+def load_menu_image() -> bytes:
+    """Скачивает картинку один раз при старте и кэширует в памяти"""
+    headers = {"User-Agent": "Mozilla/5.0"}
+    resp = requests.get(MENU_IMAGE_URL, headers=headers, timeout=10)
+    resp.raise_for_status()
+    return resp.content
+
+MENU_IMAGE_BYTES: bytes = b""   # заполняется в __main__
+MENU_IMAGE_FILE_ID: str  = ""   # после первой отправки Telegram вернёт file_id
 
 # =============================================
 #   🎨 КАСТОМНЫЕ ЭМОДЗИ ID
