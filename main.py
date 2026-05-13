@@ -195,15 +195,6 @@ def withdraw_pending_admin_text(req_id: int, user_id: int, amount: float, first_
         f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> Сумма: <b>${amount:.2f} USDT</b>\n'
         f"╰─────────────────────"
     )
-    return (
-        f"╭─────────────────────\n"
-        f"├ <b>{em(EMOJI_QUEUE,'🔄')} <b>Вы добавлены в очередь!</b>\n"
-        f"├\n"
-        f'├ <tg-emoji emoji-id="6030776052345737530">🎟</tg-emoji> Ваша позиция: <b>#{pos}</b>\n'
-        f'├ <tg-emoji emoji-id="6030537810509828330">🎟</tg-emoji> Ожидайте — мы уведомим вас\n'
-        f"├    когда подойдёт ваша очередь\n</b>"
-        f"╰─────────────────────"
-    )
 
 def submit_price_text():
     amt = settings["payout"]
@@ -852,6 +843,7 @@ def callback_handler(call):
     #   ГЛАВНОЕ МЕНЮ
     # =========================================================
     if data == "back_menu":
+        user_states.pop(uid, None)  # сбрасываем состояние при возврате в меню
         text = welcome_text(call.from_user, user)
         try:
             if BANNER_FILE_ID:
@@ -874,6 +866,7 @@ def callback_handler(call):
     #   БАЛАНС
     # =========================================================
     elif data == "balance":
+        user_states.pop(uid, None)  # сбрасываем состояние при открытии баланса
         edit(balance_text(user), balance_menu())
 
     # =========================================================
