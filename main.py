@@ -1124,10 +1124,10 @@ def callback_handler(call):
             bot.send_message(
                 target_id,
                 f"╭─────────────────────\n"
-                f'├ <b><tg-emoji emoji-id="5258215846450305872">🎟</tg-emoji> <b>Заявка принята!</b>\n'
+                f'├ <b><tg-emoji emoji-id="5258215846450305872">🎟</tg-emoji> Заявка принята!</b>\n'
                 f"├\n"
                 f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> Начислено: <b>${settings["payout"]:.2f}</b>\n'
-                f'├ <tg-emoji emoji-id="5258204546391351475">🎟</tg-emoji> Ваш баланс: <b>${u["balance"]:.2f}</b></b>\n'
+                f'├ <tg-emoji emoji-id="5258204546391351475">🎟</tg-emoji> Ваш баланс: <b>${u["balance"]:.2f}</b>\n'
                 f"╰─────────────────────",
                 parse_mode="HTML"
             )
