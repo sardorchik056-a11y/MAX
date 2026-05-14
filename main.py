@@ -36,6 +36,8 @@ EMOJI_BACK     = "6039539366177541657"
 EMOJI_ADMIN    = "5258185631355378853"
 EMOJI_CHECK    = "5282843764451195532"
 EMOJI_QUEUE    = "5323442290708985472"
+EMOJI_WISS = "5258043150110301407"
+
 
 # =============================================
 #   🖼️ BANNER FILE_ID
@@ -283,7 +285,7 @@ def send_qr_btn():
 
 def balance_menu():
     markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("💸 Вывести", callback_data="withdraw"))
+    markup.row(InlineKeyboardButton("Вывести", callback_data="withdraw", icon_custom_emoji_id=EMOJI_WISS))
     markup.row(InlineKeyboardButton("Назад", callback_data="back_menu", icon_custom_emoji_id=EMOJI_BACK))
     return markup
 
