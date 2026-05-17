@@ -159,7 +159,7 @@ def withdraw_confirm_text(amount: float, user):
 def withdraw_pending_admin_text(req_id: int, user_id: int, amount: float, first_name: str, username: str):
     return (
         f"╭─────────────────────\n"
-        f'├ <b><tg-emoji emoji-id="5904462880941545555">🎟</tg-emoji> <b>Заявка на вывод 
+        f'├ <b><tg-emoji emoji-id="5904462880941545555">🎟</tg-emoji> <b>Заявка на вывод'
         f"├\n"
         f'├ <tg-emoji emoji-id="5260399854500191689">🎟</tg-emoji> Имя: {first_name}\n'
         f'├ <tg-emoji emoji-id="5323442290708985472">🎟</tg-emoji> Username: {username}\n'
