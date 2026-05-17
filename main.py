@@ -298,10 +298,10 @@ def admin_panel_menu():
 def _process_withdraw_take(req_id: int, chat_id: int, msg_id: int | None = None):
     req = withdraw_requests.get(req_id)
     if not req:
-        bot.send_message(chat_id, f"❌ Заявка 
+        bot.send_message(chat_id, f"❌ Заявка #{req_id} не найдена.")
         return
     if req["status"] != "pending":
-        bot.send_message(chat_id, f"⚠️ Заявка 
+        bot.send_message(chat_id, f"⚠️ Заявка #{req_id} уже обработана.")
         return
 
     amount    = req["amount"]
@@ -309,7 +309,7 @@ def _process_withdraw_take(req_id: int, chat_id: int, msg_id: int | None = None)
     check     = cryptobot_create_check(amount)
 
     if check is None:
-        bot.send_message(chat_id, f"❌ Ошибка создания чека CryptoBot для заявки 
+        bot.send_message(chat_id, f"❌ Ошибка создания чека CryptoBot для заявки #{req_id}.")
         return
 
     req["status"]    = "done"
@@ -347,7 +347,7 @@ def _process_withdraw_take(req_id: int, chat_id: int, msg_id: int | None = None)
 
     confirm_text = (
         f"╭─────────────────────\n"
-        f"├ ✅ <b>Заявка 
+        f"├ ✅ <b>Заявка #{req_id} выплачена!</b>\n"
         f"├\n"
         f'├ 💸 Чек создан на <b>${amount:.2f} USDT</b>\n'
         f'├ 🔗 {check_link}\n'
@@ -364,10 +364,10 @@ def _process_withdraw_take(req_id: int, chat_id: int, msg_id: int | None = None)
 def _process_withdraw_reject(req_id: int, chat_id: int, msg_id: int | None = None):
     req = withdraw_requests.get(req_id)
     if not req:
-        bot.send_message(chat_id, f"❌ Заявка 
+        bot.send_message(chat_id, f"❌ Заявка #{req_id} не найдена.")
         return
     if req["status"] != "pending":
-        bot.send_message(chat_id, f"⚠️ Заявка 
+        bot.send_message(chat_id, f"⚠️ Заявка #{req_id} уже обработана.")
         return
 
     amount  = req["amount"]
@@ -399,7 +399,7 @@ def _process_withdraw_reject(req_id: int, chat_id: int, msg_id: int | None = Non
     except Exception:
         pass
 
-    reject_text = f"╭─────────────────────\n├ ❌ <b>Заявка 
+    reject_text = f"╭─────────────────────\n├ ❌ <b>Заявка #{req_id} отклонена.</b>\n╰─────────────────────"
     if msg_id:
         try:
             bot.edit_message_text(reject_text, chat_id, msg_id, parse_mode="HTML")
@@ -419,7 +419,7 @@ def cmd_take(message):
         return
     parts = message.text.strip().split()
     if len(parts) < 2:
-        pending_list = [f"
+        pending_list = [f"#{r} — ${withdraw_requests[r]['amount']:.2f}"
                         for r in withdraw_requests if withdraw_requests[r]["status"] == "pending"]
         if not pending_list:
             bot.send_message(message.chat.id, "📭 Нет ожидающих заявок на вывод.")
@@ -644,7 +644,7 @@ def handle_text(message):
         bot.send_message(
             message.chat.id,
             f"╭─────────────────────\n"
-            f"├ 👤 <b>Пользователь 
+            f"├ 👤 <b>Пользователь {target_id}</b>\n"
             f"├\n"
             f"├ 📛 Имя: {esc(u['first_name'])}\n"
             f"├ 🔗 Username: @{esc(u['username']) if u['username'] else '—'}\n"
@@ -946,7 +946,7 @@ def callback_handler(call):
             f'├ <b><tg-emoji emoji-id="5258043150110301407">🎟</tg-emoji> <b>Заявка отправлена!</b>\n'
             f"├\n"
             f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> Сумма: <b>${amount:.2f} USDT</b>\n'
-            f'├ <tg-emoji emoji-id="6030537810509828330">🎟</tg-emoji> Номер заявки: <b>
+            f'├ <tg-emoji emoji-id="6030537810509828330">🎟</tg-emoji> Номер заявки: <b>#{req_id}</b>\n'
             f"├\n"
             f"├ Ожидайте — администратор обработает\n"
             f"├ заявку и пришлёт чек CryptoBot</b>\n"
