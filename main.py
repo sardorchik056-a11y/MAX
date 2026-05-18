@@ -5,14 +5,14 @@ import time
 import datetime
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 
-BOT_TOKEN       = "8918670807:AAHFkCF8kemTCIVlbeLfmRkPUd6gk3wdKVo"
-CRYPTOBOT_TOKEN = "552018:AAmEzVekZI0E1Qcpi0ccOxbkOMk01J2Qs2n"
+BOT_TOKEN       = "8628524678:AAH6AuW7KdTF-_-OiVfVH5i_LJH5NLSDg1I"
+CRYPTOBOT_TOKEN = "583673:AAwGj7YtqTJZuSomTia1W08YRNo1udgrQiL"
 CRYPTOBOT_API   = "https://pay.crypt.bot/api"
 
 # ══════════════════════════════════════════════════════
 #  👑  СПИСОК АДМИНИСТРАТОРОВ  (добавляйте ID сюда)
 # ══════════════════════════════════════════════════════
-ADMIN_IDS = [8118184388]          # пример: [111111111, 222222222]
+ADMIN_IDS = [8118184388, 8521752725]          # пример: [111111111, 222222222]
 
 PAYOUT_AMOUNT = 5.0
 QUEUE_ENABLED = True
