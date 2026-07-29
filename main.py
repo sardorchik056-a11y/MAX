@@ -13,7 +13,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFil
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 # ========== НАСТРОЙКИ ==========
-TOKEN = "ВАШ_ТОКЕН_ОТ_BOTFATHER"  # Замените на свой
+TOKEN = "8651956926:AAG3ML1uGBPQOgrM5WAMl3kXaRLvVxTHCsw"  # Замените на свой
 
 # Путь к модели (если используете локальную LLM)
 # Если модели нет — бот будет отвечать шаблонными фразами
