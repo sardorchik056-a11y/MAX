@@ -15,9 +15,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 # ========== НАСТРОЙКИ ==========
 TOKEN = "8651956926:AAG3ML1uGBPQOgrM5WAMl3kXaRLvVxTHCsw"  # Замените на свой
 
-# Путь к модели (если используете локальную LLM)
-# Если модели нет — бот будет отвечать шаблонными фразами
-USE_LLM = False  # Поставьте True, если установили llama-cpp-python и скачали модель
+# Если хотите использовать локальную LLM - поставьте True и укажите путь к модели
+USE_LLM = False  # Поставьте True, если установили llama-cpp-python
 MODEL_PATH = "/opt/models/saiga_7b_v2_q4_K.gguf"  # путь к модели
 
 # ========== ЛОГИРОВАНИЕ ==========
@@ -128,7 +127,6 @@ class MemeMaker:
         
         # Сохраняем в BytesIO
         bio = BytesIO()
-        bio.seek(0)
         img.save(bio, format='PNG')
         bio.seek(0)
         return bio
@@ -138,10 +136,11 @@ class BotInstance:
     def __init__(self):
         self.db_path = DB_PATH
         self.meme_maker = MemeMaker()
+        self.use_llm = USE_LLM  # Сохраняем глобальную переменную как атрибут
         
         # Загружаем LLM, если включено
         self.llm = None
-        if USE_LLM:
+        if self.use_llm:
             try:
                 from llama_cpp import Llama
                 self.llm = Llama(
@@ -153,7 +152,7 @@ class BotInstance:
                 logging.info("LLM модель загружена")
             except Exception as e:
                 logging.error(f"Не удалось загрузить LLM: {e}")
-                USE_LLM = False
+                self.use_llm = False
     
     # ===== РАБОТА С БАЗОЙ =====
     def get_user(self, telegram_id: int) -> dict:
@@ -234,7 +233,7 @@ class BotInstance:
     
     # ===== ГЕНЕРАЦИЯ ОТВЕТОВ =====
     def generate_response(self, telegram_id: int, message: str) -> tuple:
-        """Возвращает (текст_ответа, путь_к_картинке_или_None)"""
+        """Возвращает (текст_ответа, BytesIO_с_картинкой_или_None)"""
         
         # Сохраняем сообщение пользователя
         self.save_message(telegram_id, "user", message)
@@ -267,7 +266,7 @@ class BotInstance:
             return response_text, meme
         
         # Если есть LLM — используем её
-        if self.llm:
+        if self.use_llm and self.llm:
             history = self.get_history(telegram_id, 10)
             prompt = f"<|system|>\n{section['system_prompt']}\n"
             for msg in history:
@@ -282,7 +281,8 @@ class BotInstance:
                 answer = response["choices"][0]["text"].strip()
                 if len(answer) < 3:
                     answer = f"{section['emoji']} Интересно... Расскажи ещё!"
-            except:
+            except Exception as e:
+                logging.error(f"LLM ошибка: {e}")
                 answer = f"{section['emoji']} Что-то я задумался... Давай ещё раз!"
         else:
             # Шаблонные ответы
@@ -296,6 +296,18 @@ class BotInstance:
         """Шаблонные ответы без LLM"""
         msg = message.lower()
         emoji = SECTIONS[section]["emoji"]
+        
+        # Дерзкие ответы для Гопника
+        if section == "gopnik":
+            gopnik_replies = [
+                f"{emoji} Чё надо, пацан? Говори давай, не тяни!",
+                f"{emoji} О, живой! Чё хотел? Быстро, у меня дела!",
+                f"{emoji} Слышь, ты чё такой серьёзный? Расслабься, бля!",
+                f"{emoji} А чё, нормально! Давай ещё, не тормози!",
+                f"{emoji} Ну ты даёшь, братан! Колись, чё случилось?",
+                f"{emoji} Ой, всё! Ты меня заколебал уже! Шучу, говори давай 😈",
+            ]
+            return random.choice(gopnik_replies)
         
         if "привет" in msg or "здрав" in msg:
             replies = [
@@ -321,12 +333,19 @@ class BotInstance:
                 f"{emoji} Обращайся, я всегда рад помочь!",
                 f"{emoji} Не за что! Приятно было поболтать!"
             ]
+        elif "мем" in msg:
+            replies = [
+                f"{emoji} О, хочешь мем? Напиши /meme [текст]!",
+                f"{emoji} Мемы — моя страсть! /meme тема",
+            ]
         else:
             replies = [
                 f"{emoji} О, интересно! Расскажи подробнее!",
                 f"{emoji} Хм, я такого ещё не слышал 🤔",
                 f"{emoji} Вау! А что дальше?",
-                f"{emoji} Забавно! А как ты к этому относишься?"
+                f"{emoji} Забавно! А как ты к этому относишься?",
+                f"{emoji} Ух ты! Я аж задумался...",
+                f"{emoji} Класс! А ещё что-нибудь расскажи!",
             ]
         
         return random.choice(replies)
@@ -345,8 +364,8 @@ def get_section_keyboard():
             callback_data=f"section_{key}"
         ))
     builder.add(InlineKeyboardButton(text="ℹ️ Инфо", callback_data="info"))
-    builder.row()
-    builder.add(InlineKeyboardButton(text="🧹 Очистить историю", callback_data="clear"))
+    builder.add(InlineKeyboardButton(text="🧹 Очистить", callback_data="clear"))
+    builder.adjust(1, 1, 1, 1, 1, 1)  # По одной кнопке в ряд
     return builder.as_markup()
 
 # ========== ОБРАБОТЧИКИ КОМАНД ==========
