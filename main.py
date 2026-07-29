@@ -1,1416 +1,487 @@
-import telebot
-import requests
-import threading
-import time
-import datetime
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+import asyncio
+import logging
+import os
+import random
+import sqlite3
+from datetime import datetime
+from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont
 
-BOT_TOKEN       = "8628524678:AAH6AuW7KdTF-_-OiVfVH5i_LJH5NLSDg1I"
-CRYPTOBOT_TOKEN = "583673:AAwGj7YtqTJZuSomTia1W08YRNo1udgrQiL"
-CRYPTOBOT_API   = "https://pay.crypt.bot/api"
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-# ══════════════════════════════════════════════════════
-#  👑  СПИСОК АДМИНИСТРАТОРОВ  (добавляйте ID сюда)
-# ══════════════════════════════════════════════════════
-ADMIN_IDS = [8118184388, 8521752725]          # пример: [111111111, 222222222]
+# ========== НАСТРОЙКИ ==========
+TOKEN = "ВАШ_ТОКЕН_ОТ_BOTFATHER"  # Замените на свой
 
-PAYOUT_AMOUNT = 5.0
-QUEUE_ENABLED = True
+# Путь к модели (если используете локальную LLM)
+# Если модели нет — бот будет отвечать шаблонными фразами
+USE_LLM = False  # Поставьте True, если установили llama-cpp-python и скачали модель
+MODEL_PATH = "/opt/models/saiga_7b_v2_q4_K.gguf"  # путь к модели
 
-EMOJI_RULES   = "5258185631355378853"
-EMOJI_BALANCE = "5258204546391351475"
-EMOJI_SUBMIT  = "5449407131675558756"
-EMOJI_HISTORY = "6030776052345737530"
-EMOJI_STATS   = "5258330865674494479"
-EMOJI_BACK    = "6039539366177541657"
-EMOJI_ADMIN   = "5258185631355378853"
-EMOJI_CHECK   = "5282843764451195532"
-EMOJI_QUEUE   = "5323442290708985472"
-EMOJI_WISS    = "5258043150110301407"
+# ========== ЛОГИРОВАНИЕ ==========
+logging.basicConfig(level=logging.INFO)
 
-BANNER_FILE_ID = "AgACAgIAAxkBAAMeagQukWF_Zj77_eYNPXcEywJNg0EAAg4Taxs1GSBI3gdnW__fsXUBAAMCAAN5AAM7BA"
+# ========== ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ ==========
+DB_PATH = "bot_database.db"
 
-# ══════════════════════════════════════════════════════
-#  Хранилища данных
-# ══════════════════════════════════════════════════════
-users_db           = {}   # user_id → dict
-queue              = []   # очередь: список user_id
-pending            = {}   # user_id → user_msg_id  (QR на проверке)
-pending_admin_msgs = {}   # user_id → [(admin_chat_id, admin_msg_id), ...]
-withdraw_requests  = {}   # req_id  → dict
-withdraw_counter   = [0]
-settings = {
-    "payout": PAYOUT_AMOUNT,
-    "rules": (
-        '<b><tg-emoji emoji-id="6030776052345737530">🎟</tg-emoji> Правила сервиса:</b>\n\n'
-        "├ <b>1.</b> Номер должен быть зарегистрирован на вас\n"
-        "├ <b>2.</b> Номер не должен быть заблокирован\n"
-        "├ <b>3.</b> QR-код должен быть чётким и читаемым\n"
-        "├ <b>4.</b> Одна заявка в день с одного аккаунта\n"
-        "├ <b>5.</b> При нарушении — бан без предупреждения\n"
-        "╰ <b>6.</b> Выплата производится после проверки"
-    ),
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    # Таблица пользователей
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER UNIQUE NOT NULL,
+            username TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            current_section TEXT DEFAULT 'funny',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    # Таблица истории сообщений
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    """)
+    
+    conn.commit()
+    conn.close()
+    logging.info("База данных инициализирована")
+
+# ========== РАЗДЕЛЫ (ПЕРСОНАЖИ) ==========
+SECTIONS = {
+    "funny": {
+        "emoji": "🎉",
+        "name": "Весёлый Макс",
+        "description": "Шутит, иронизирует, поднимает настроение",
+        "system_prompt": "Ты — Макс, весёлый собеседник. Шути, используй эмодзи, отвечай кратко."
+    },
+    "philosopher": {
+        "emoji": "🧐",
+        "name": "Философ София",
+        "description": "Глубокие размышления, мудрые вопросы",
+        "system_prompt": "Ты — София, мудрый философ. Говори глубоко, задавай вопросы о смысле жизни."
+    },
+    "clown": {
+        "emoji": "🤣",
+        "name": "Клоун Тимофей",
+        "description": "Безумные шутки, абсурд, мемы",
+        "system_prompt": "Ты — безумный клоун! Шути, используй абсурд, мемы, смейся громко!"
+    },
+    "gopnik": {
+        "emoji": "😈",
+        "name": "Гопник Серёга",
+        "description": "Дерзкий, матерится, уличный сленг",
+        "system_prompt": "Ты — Гопник Серёга. Общайся на сленге, матерись, будь дерзким, но честным."
+    },
+    "sarcastic": {
+        "emoji": "😏",
+        "name": "Доктор Сарказм",
+        "description": "Циничный, язвительный, чёрный юмор",
+        "system_prompt": "Ты — циничный доктор. Отвечай с сарказмом, используй чёрный юмор."
+    }
 }
 
-user_states       = {}
-waiting_for_photo = set()
-waiting_for_qr    = set()
-admin_states      = {}
-
-bot = telebot.TeleBot(BOT_TOKEN)
-
-# ══════════════════════════════════════════════════════
-#  Вспомогательные функции
-# ══════════════════════════════════════════════════════
-def get_user(user_id):
-    if user_id not in users_db:
-        users_db[user_id] = {
-            "balance":        0.0,
-            "numbers_rented": 0,
-            "history":        [],
-            "banned":         False,
-            "username":       "",
-            "first_name":     "",
-        }
-    return users_db[user_id]
-
-def get_status(user):
-    return "Активен" if user["numbers_rented"] >= 1 else "Неактивен"
-
-def esc(text):
-    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-def is_admin(user_id):
-    return user_id in ADMIN_IDS
-
-def em(eid, fallback="⭐"):
-    return f'<tg-emoji emoji-id="{eid}">{fallback}</tg-emoji>'
-
-def notify_all_admins(text="", markup=None, photo=None, caption=None):
-    """Отправить сообщение всем администраторам. Возвращает [(chat_id, msg_id), ...]."""
-    sent = []
-    for admin_id in ADMIN_IDS:
+# ========== ГЕНЕРАТОР МЕМОВ ==========
+class MemeMaker:
+    @staticmethod
+    def make_meme(top_text: str, bottom_text: str) -> BytesIO:
+        """Создаёт мем с текстом сверху и снизу, возвращает BytesIO"""
+        width, height = 600, 400
+        img = Image.new('RGB', (width, height), color=(255, 215, 0))
+        draw = ImageDraw.Draw(img)
+        
         try:
-            if photo:
-                m = bot.send_photo(admin_id, photo, caption=caption,
-                                   parse_mode="HTML", reply_markup=markup)
-            else:
-                m = bot.send_message(admin_id, text,
-                                     parse_mode="HTML", reply_markup=markup)
-            sent.append((admin_id, m.message_id))
-        except Exception as e:
-            print(f"[notify_admin {admin_id}] {e}")
-    return sent
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 36)
+            font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
+        except:
+            font = ImageFont.load_default()
+            font_small = font
+        
+        # Рамка
+        draw.rectangle([10, 10, width-10, height-10], outline=(0,0,0), width=5)
+        
+        # Верхний текст
+        draw.text((30, 20), top_text.upper(), fill=(0,0,0), font=font)
+        
+        # Большой текст по центру
+        lines = bottom_text.split('\n')
+        y = 150
+        for line in lines[:3]:
+            draw.text((30, y), line, fill=(0,0,0), font=font)
+            y += 50
+        
+        # Нижний колонтитул
+        draw.text((30, height-40), "#МемОтБота", fill=(80,80,80), font=font_small)
+        
+        # Сохраняем в BytesIO
+        bio = BytesIO()
+        bio.seek(0)
+        img.save(bio, format='PNG')
+        bio.seek(0)
+        return bio
 
-# ══════════════════════════════════════════════════════
-#  CryptoBot
-# ══════════════════════════════════════════════════════
-def cryptobot_create_check(amount: float, currency: str = "USDT") -> dict | None:
-    try:
-        resp = requests.post(
-            f"{CRYPTOBOT_API}/createCheck",
-            headers={"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN},
-            json={"asset": currency, "amount": str(amount)},
-            timeout=10,
-        )
-        data = resp.json()
-        if data.get("ok"):
-            return data["result"]
+# ========== ОСНОВНОЙ БОТ ==========
+class BotInstance:
+    def __init__(self):
+        self.db_path = DB_PATH
+        self.meme_maker = MemeMaker()
+        
+        # Загружаем LLM, если включено
+        self.llm = None
+        if USE_LLM:
+            try:
+                from llama_cpp import Llama
+                self.llm = Llama(
+                    model_path=MODEL_PATH,
+                    n_ctx=2048,
+                    n_threads=4,
+                    verbose=False
+                )
+                logging.info("LLM модель загружена")
+            except Exception as e:
+                logging.error(f"Не удалось загрузить LLM: {e}")
+                USE_LLM = False
+    
+    # ===== РАБОТА С БАЗОЙ =====
+    def get_user(self, telegram_id: int) -> dict:
+        conn = sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            return {
+                "id": row[0],
+                "telegram_id": row[1],
+                "username": row[2],
+                "first_name": row[3],
+                "last_name": row[4],
+                "current_section": row[5],
+                "created_at": row[6],
+                "last_active": row[7]
+            }
         return None
-    except Exception as e:
-        print(f"CryptoBot error: {e}")
-        return None
-
-# ══════════════════════════════════════════════════════
-#  Фоновый поток — автообновление позиции каждые 5 мин
-# ══════════════════════════════════════════════════════
-def _queue_updater():
-    while True:
-        time.sleep(300)          # 5 минут
-        snapshot = list(queue)   # копия, чтобы не блокировать
-        total    = len(snapshot)
-        for i, user_id in enumerate(snapshot):
-            pos = i + 1
-            if pos == 1:
-                continue         # первый — пусть сам заходит в «Сдать номер»
+    
+    def register_user(self, telegram_id: int, username: str, first_name: str, last_name: str = ""):
+        conn = sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT OR REPLACE INTO users (telegram_id, username, first_name, last_name, last_active)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (telegram_id, username, first_name, last_name))
+        conn.commit()
+        conn.close()
+    
+    def get_section(self, telegram_id: int) -> str:
+        conn = sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT current_section FROM users WHERE telegram_id = ?", (telegram_id,))
+        row = cur.fetchone()
+        conn.close()
+        return row[0] if row else "funny"
+    
+    def set_section(self, telegram_id: int, section: str):
+        conn = sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET current_section = ? WHERE telegram_id = ?", (section, telegram_id))
+        conn.commit()
+        conn.close()
+    
+    def save_message(self, telegram_id: int, role: str, content: str):
+        conn = sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO messages (user_id, role, content)
+            SELECT id, ?, ? FROM users WHERE telegram_id = ?
+        """, (role, content, telegram_id))
+        conn.commit()
+        conn.close()
+    
+    def get_history(self, telegram_id: int, limit: int = 10) -> list:
+        conn = sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT role, content FROM messages
+            WHERE user_id = (SELECT id FROM users WHERE telegram_id = ?)
+            ORDER BY created_at DESC LIMIT ?
+        """, (telegram_id, limit))
+        rows = cur.fetchall()
+        conn.close()
+        return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
+    
+    def clear_history(self, telegram_id: int):
+        conn = sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute("""
+            DELETE FROM messages
+            WHERE user_id = (SELECT id FROM users WHERE telegram_id = ?)
+        """, (telegram_id,))
+        conn.commit()
+        conn.close()
+    
+    # ===== ГЕНЕРАЦИЯ ОТВЕТОВ =====
+    def generate_response(self, telegram_id: int, message: str) -> tuple:
+        """Возвращает (текст_ответа, путь_к_картинке_или_None)"""
+        
+        # Сохраняем сообщение пользователя
+        self.save_message(telegram_id, "user", message)
+        
+        # Получаем раздел пользователя
+        section_key = self.get_section(telegram_id)
+        section = SECTIONS[section_key]
+        
+        # Проверяем ключевые слова для мемов
+        if "девушк" in message.lower() or "сколько лет" in message.lower():
+            response_text = "18... но ощущается как 48! 😂"
+            meme = self.meme_maker.make_meme(
+                top_text="Моей девушке 18 лет",
+                bottom_text="Но ощущается как 48! 😂"
+            )
+            self.save_message(telegram_id, "assistant", response_text)
+            return response_text, meme
+        
+        # Проверяем запрос на мем
+        if "мем" in message.lower() or "картинк" in message.lower():
+            text = message.replace("мем", "").replace("картинку", "").strip()
+            if not text:
+                text = "Смешной мем"
+            meme = self.meme_maker.make_meme(
+                top_text="МЕМ ОТ БОТА",
+                bottom_text=text.upper()
+            )
+            response_text = f"Держи мем! 😂\n\nТема: {text}"
+            self.save_message(telegram_id, "assistant", response_text)
+            return response_text, meme
+        
+        # Если есть LLM — используем её
+        if self.llm:
+            history = self.get_history(telegram_id, 10)
+            prompt = f"<|system|>\n{section['system_prompt']}\n"
+            for msg in history:
+                if msg["role"] == "user":
+                    prompt += f"<|user|>\n{msg['content']}\n"
+                else:
+                    prompt += f"<|assistant|>\n{msg['content']}\n"
+            prompt += f"<|user|>\n{message}\n<|assistant|>\n"
+            
             try:
-                bot.send_message(
-                    user_id,
-                    f"╭─────────────────────\n"
-                    f'├ {em(EMOJI_QUEUE,"🔄")} <b>Обновление очереди</b>\n'
-                    f"├\n"
-                    f"├ Ваша позиция: <b>{pos}</b> из <b>{total}</b>\n"
-                    f"╰─────────────────────",
-                    parse_mode="HTML",
-                )
-            except Exception:
-                pass
-
-threading.Thread(target=_queue_updater, daemon=True).start()
-
-# ══════════════════════════════════════════════════════
-#  Тексты
-# ══════════════════════════════════════════════════════
-def queue_text(pos):
-    total = len(queue)
-    return (
-        f"╭─────────────────────\n"
-        f'├ <b>{em(EMOJI_QUEUE,"⏳")} Вы в очереди</b>\n'
-        f"├\n"
-        f'├ <tg-emoji emoji-id="6030537810509828330">🎟</tg-emoji> '
-        f"Ваша позиция: <b>{pos}</b> из <b>{total}</b>\n"
-        f"├\n"
-        f"├ Позиция обновляется каждые 5 минут\n"
-        f"╰─────────────────────"
-    )
-
-def welcome_text(tg_user, user):
-    name     = esc(tg_user.first_name or "—")
-    username = f"@{esc(tg_user.username)}" if tg_user.username else "—"
-    return (
-        f"╭─────────────────────\n"
-        f'├ <b><tg-emoji emoji-id="5260399854500191689">🎟</tg-emoji> {name}</b>\n'
-        f'├ <tg-emoji emoji-id="5282843764451195532">🎟</tg-emoji> ID: <code>{tg_user.id}</code>\n'
-        f'├ <tg-emoji emoji-id="5323442290708985472">🎟</tg-emoji> : {username}\n'
-        f"├\n"
-        f'├ <tg-emoji emoji-id="5258204546391351475">🎟</tg-emoji> Баланс: <b>${user["balance"]:.2f}</b>\n'
-        f'├ <tg-emoji emoji-id="5449407131675558756">🎟</tg-emoji> Сдано: <b>{user["numbers_rented"]}</b> номеров\n'
-        f'├ <tg-emoji emoji-id="5258185631355378853">🎟</tg-emoji> Статус: {get_status(user)}\n'
-        f"╰─────────────────────"
-    )
-
-def rules_text():
-    return settings["rules"]
-
-def balance_text(user):
-    if user["history"]:
-        lines = ""
-        for h in reversed(user["history"][-5:]):
-            sign  = "+" if h["amount"] > 0 else ""
-            lines += f"├ {h['date']} — <b>{sign}${h['amount']:.2f}</b> ({h['status']})\n"
-    else:
-        lines = "├ История пуста\n"
-    return (
-        f"╭─────────────────────\n"
-        f"├ <b>{em(EMOJI_BALANCE,'💰')} Ваш баланс</b>\n"
-        f"├\n"
-        f'├ <tg-emoji emoji-id="5904462880941545555">🎟</tg-emoji> '
-        f'Доступно: <b>${user["balance"]:.2f}</b>\n'
-        f"├\n"
-        f'├ <tg-emoji emoji-id="6030776052345737530">🎟</tg-emoji> <b>Последние операции:</b>\n'
-        f"{lines}"
-        f"╰─────────────────────"
-    )
-
-def withdraw_text(user):
-    return (
-        f"╭─────────────────────\n"
-        f"├ <b>{em(EMOJI_BALANCE,'💸')} Вывод средств</b>\n"
-        f"├\n"
-        f'├ <tg-emoji emoji-id="5904462880941545555">🎟</tg-emoji> '
-        f'Доступно: <b>${user["balance"]:.2f}</b>\n'
-        f"├\n"
-        f'├ <tg-emoji emoji-id="5258108352008823107">🎟</tg-emoji> Минимальная сумма: <b>$1.00</b>\n'
-        f'├ <tg-emoji emoji-id="6030776052345737530">🎟</tg-emoji> Выплата через: <b>@CryptoBot</b>\n'
-        f"├\n"
-        f"├ Введите сумму для вывода\n"
-        f"╰─────────────────────"
-    )
-
-def withdraw_confirm_text(amount: float, user):
-    return (
-        f"╭─────────────────────\n"
-        f"├ <b>{em(EMOJI_BALANCE,'💸')} Подтверждение вывода</b>\n"
-        f"├\n"
-        f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> Сумма: <b>${amount:.2f}</b>\n'
-        f'├ <tg-emoji emoji-id="5258204546391351475">🎟</tg-emoji> '
-        f'Останется: <b>${user["balance"] - amount:.2f}</b>\n'
-        f'├ <tg-emoji emoji-id="5258108352008823107">🎟</tg-emoji> Способ: <b>@CryptoBot (USDT)</b>\n'
-        f"├\n"
-        f"├ Подтвердите заявку на вывод\n"
-        f"╰─────────────────────"
-    )
-
-def withdraw_pending_admin_text(req_id, user_id, amount, first_name, username):
-    return (
-        f"╭─────────────────────\n"
-        f'├ <b><tg-emoji emoji-id="5904462880941545555">🎟</tg-emoji> '
-        f"Заявка на вывод #{req_id}</b>\n"
-        f"├\n"
-        f'├ <tg-emoji emoji-id="5260399854500191689">🎟</tg-emoji> Имя: {first_name}\n'
-        f'├ <tg-emoji emoji-id="5323442290708985472">🎟</tg-emoji> Username: {username}\n'
-        f'├ <tg-emoji emoji-id="5282843764451195532">🎟</tg-emoji> ID: <code>{user_id}</code>\n'
-        f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> Сумма: <b>${amount:.2f} USDT</b>\n'
-        f"╰─────────────────────"
-    )
-
-def submit_price_text():
-    amt = settings["payout"]
-    return (
-        f"╭─────────────────────\n"
-        f"├ <b>{em(EMOJI_SUBMIT,'📦')} Сдать номер</b>\n"
-        f"├\n"
-        f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> '
-        f"Выплата за номер: <b>${amt:.2f}</b>\n"
-        f"├\n"
-        f'├ <tg-emoji emoji-id="5258108352008823107">🎟</tg-emoji> Прикрепите QR-код номера\n'
-        f"├    и нажмите кнопку ниже\n"
-        f"╰─────────────────────"
-    )
-
-def history_text(user):
-    if not user["history"]:
-        body = "├ История операций пуста\n"
-    else:
-        body = ""
-        for h in reversed(user["history"][-10:]):
-            sign  = "+" if h["amount"] > 0 else ""
-            body += f"├ {h['date']} {sign}${h['amount']:.2f} — {h['status']}\n"
-    return (
-        f"╭─────────────────────\n"
-        f'├ <b><tg-emoji emoji-id="6030776052345737530">🎟</tg-emoji> История операций</b>\n'
-        f"├\n"
-        f"{body}"
-        f"╰─────────────────────"
-    )
-
-def statistics_text():
-    return (
-        f"╭─────────────────────\n"
-        f"├ <b>{em(EMOJI_STATS,'📊')} Статистика</b>\n"
-        f"├\n"
-        f'├ <tg-emoji emoji-id="5258513401784573443">🎟</tg-emoji> '
-        f"Пользователей: <b>{len(users_db)}</b>\n"
-        f'├ <tg-emoji emoji-id="5449407131675558756">🎟</tg-emoji> '
-        f"Сдано номеров: <b>{sum(u['numbers_rented'] for u in users_db.values())}</b>\n"
-        f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> '
-        f"Выплачено: <b>${sum(u['balance'] for u in users_db.values()):.2f}</b>\n"
-        f'├ <tg-emoji emoji-id="6030537810509828330">🎟</tg-emoji> '
-        f"В очереди: <b>{len(queue)}</b>\n"
-        f'├ <tg-emoji emoji-id="6039496266180726678">🎟</tg-emoji> '
-        f"На проверке: <b>{len(pending)}</b>\n"
-        f"╰─────────────────────"
-    )
-
-def admin_top_stats_text():
-    """ТОП-20 пользователей по сдаче и по балансу."""
-    medal = {1: "🥇", 2: "🥈", 3: "🥉"}
-
-    by_rented  = sorted(users_db.items(),
-                        key=lambda x: x[1]["numbers_rented"], reverse=True)[:20]
-    by_balance = sorted(users_db.items(),
-                        key=lambda x: x[1]["balance"],        reverse=True)[:20]
-
-    def row(i, uid, u, val):
-        m    = medal.get(i, f"{i}.")
-        name = esc(u.get("first_name") or str(uid))
-        un   = f"@{esc(u['username'])}" if u.get("username") else "—"
-        return f"├ {m} {name} ({un}) — <b>{val}</b>\n"
-
-    text  = "╭─────────────────────\n"
-    text += "├ 🏆 <b>ТОП-20 по сдаче номеров:</b>\n├\n"
-    if by_rented:
-        for i, (uid, u) in enumerate(by_rented, 1):
-            text += row(i, uid, u, f"{u['numbers_rented']} шт.")
-    else:
-        text += "├ Нет данных\n"
-
-    text += "├\n├ 💰 <b>ТОП-20 по балансу:</b>\n├\n"
-    if by_balance:
-        for i, (uid, u) in enumerate(by_balance, 1):
-            text += row(i, uid, u, f"${u['balance']:.2f}")
-    else:
-        text += "├ Нет данных\n"
-
-    text += "╰─────────────────────"
-    return text
-
-# ══════════════════════════════════════════════════════
-#  Клавиатуры
-# ══════════════════════════════════════════════════════
-def main_menu():
-    m = InlineKeyboardMarkup()
-    m.row(
-        InlineKeyboardButton("Правила",     callback_data="rules",
-                             icon_custom_emoji_id=EMOJI_RULES),
-        InlineKeyboardButton("Баланс",      callback_data="balance",
-                             icon_custom_emoji_id=EMOJI_BALANCE),
-    )
-    m.row(InlineKeyboardButton("Сдать номер", callback_data="submit_number",
-                               icon_custom_emoji_id=EMOJI_SUBMIT))
-    m.row(
-        InlineKeyboardButton("История",    callback_data="history",
-                             icon_custom_emoji_id=EMOJI_HISTORY),
-        InlineKeyboardButton("Статистика", callback_data="statistics",
-                             icon_custom_emoji_id=EMOJI_STATS),
-    )
-    return m
-
-def back_btn(target="back_menu"):
-    m = InlineKeyboardMarkup()
-    m.row(InlineKeyboardButton("Назад", callback_data=target,
-                               icon_custom_emoji_id=EMOJI_BACK))
-    return m
-
-def submit_menu():
-    m = InlineKeyboardMarkup()
-    m.row(InlineKeyboardButton("Прикрепить QR-код", callback_data="attach_qr"))
-    m.row(InlineKeyboardButton("Назад", callback_data="back_menu",
-                               icon_custom_emoji_id=EMOJI_BACK))
-    return m
-
-def send_qr_btn():
-    m = InlineKeyboardMarkup()
-    m.row(InlineKeyboardButton("✅ Отправить заявку", callback_data="send_qr"))
-    m.row(InlineKeyboardButton("Изменить QR-код",    callback_data="attach_qr"))
-    m.row(InlineKeyboardButton("Назад", callback_data="back_menu",
-                               icon_custom_emoji_id=EMOJI_BACK))
-    return m
-
-def pending_menu():
-    """Меню когда заявка уже на проверке — можно отменить."""
-    m = InlineKeyboardMarkup()
-    m.row(InlineKeyboardButton("❌ Отменить заявку", callback_data="cancel_application"))
-    m.row(InlineKeyboardButton("Назад", callback_data="back_menu",
-                               icon_custom_emoji_id=EMOJI_BACK))
-    return m
-
-def balance_menu():
-    m = InlineKeyboardMarkup()
-    m.row(InlineKeyboardButton("Вывести", callback_data="withdraw",
-                               icon_custom_emoji_id=EMOJI_WISS))
-    m.row(InlineKeyboardButton("Назад",   callback_data="back_menu",
-                               icon_custom_emoji_id=EMOJI_BACK))
-    return m
-
-def withdraw_confirm_btn(amount: float):
-    m = InlineKeyboardMarkup()
-    m.row(
-        InlineKeyboardButton("✅ Подтвердить",
-                             callback_data=f"withdraw_confirm_{amount:.2f}"),
-        InlineKeyboardButton("❌ Отмена", callback_data="balance"),
-    )
-    return m
-
-def admin_withdraw_btn(req_id: int):
-    m = InlineKeyboardMarkup()
-    m.row(
-        InlineKeyboardButton("✅ Принять",   callback_data=f"wd_take_{req_id}"),
-        InlineKeyboardButton("❌ Отклонить", callback_data=f"wd_reject_{req_id}"),
-    )
-    return m
-
-def admin_review_btn(user_id):
-    m = InlineKeyboardMarkup()
-    m.row(
-        InlineKeyboardButton("✅ Принять",   callback_data=f"approve_{user_id}"),
-        InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{user_id}"),
-    )
-    return m
-
-def admin_panel_menu():
-    m = InlineKeyboardMarkup()
-    m.row(InlineKeyboardButton("📊 Статистика",         callback_data="adm_stats"))
-    m.row(InlineKeyboardButton("🏆 Топ пользователей",  callback_data="adm_top_stats"))
-    m.row(
-        InlineKeyboardButton("🔍 Проверка юзера",  callback_data="adm_check"),
-        InlineKeyboardButton("💰 Выдать баланс",   callback_data="adm_give"),
-    )
-    m.row(
-        InlineKeyboardButton("➖ Снять баланс",    callback_data="adm_take"),
-        InlineKeyboardButton("🔄 Обнулить всех",   callback_data="adm_reset_all"),
-    )
-    m.row(InlineKeyboardButton("📢 Рассылка",          callback_data="adm_broadcast"))
-    m.row(InlineKeyboardButton("💵 Изменить выплату",  callback_data="adm_payout"))
-    return m
-
-# ══════════════════════════════════════════════════════
-#  Вспомогательная функция: завершение обработки QR
-#  После approve/reject пользователь добавляется в
-#  конец очереди — он может подать новый QR только
-#  дождавшись своей очереди.
-# ══════════════════════════════════════════════════════
-def _finish_qr_review(target_id):
-    """Убрать из pending и поставить в конец очереди."""
-    pending.pop(target_id, None)
-    pending_admin_msgs.pop(target_id, None)
-    if QUEUE_ENABLED and target_id not in queue:
-        queue.append(target_id)
-
-# ══════════════════════════════════════════════════════
-#  Обработка вывода средств
-# ══════════════════════════════════════════════════════
-def _process_withdraw_take(req_id: int, chat_id: int, msg_id: int | None = None):
-    req = withdraw_requests.get(req_id)
-    if not req:
-        bot.send_message(chat_id, f"❌ Заявка #{req_id} не найдена.")
-        return
-    if req["status"] != "pending":
-        bot.send_message(chat_id, f"⚠️ Заявка #{req_id} уже обработана.")
-        return
-
-    amount  = req["amount"]
-    user_id = req["user_id"]
-    check   = cryptobot_create_check(amount)
-    if check is None:
-        bot.send_message(chat_id,
-                         f"❌ Ошибка создания чека CryptoBot для заявки #{req_id}.")
-        return
-
-    req["status"]    = "done"
-    check_link       = check.get("bot_check_url") or check.get("check_url") or "—"
-    req["check_url"] = check_link
-
-    u = users_db.get(user_id)
-    if u:
-        for h in reversed(u["history"]):
-            if h["status"] == "Вывод (ожидание)" and h["amount"] == -amount:
-                h["status"] = "Вывод выплачен"
-                break
-
-    try:
-        bot.send_message(
-            user_id,
-            f"╭─────────────────────\n"
-            f'├ <b><tg-emoji emoji-id="6041720006973067267">🎟</tg-emoji> Вывод одобрен!</b>\n'
-            f"├\n"
-            f'├ <tg-emoji emoji-id="5904462880941545555">🎟</tg-emoji> '
-            f"Сумма: <b>${amount:.2f} USDT</b>\n"
-            f'├ <tg-emoji emoji-id="6030776052345737530">🎟</tg-emoji> Чек: <b>@CryptoBot</b>\n'
-            f"├\n"
-            f"├ Нажмите кнопку ниже, чтобы получить\n"
-            f"├ ваши средства через @CryptoBot\n"
-            f"╰─────────────────────",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup().row(
-                InlineKeyboardButton("Получить средства", url=check_link)
-            ),
-        )
-    except Exception:
-        pass
-
-    ok_text = (
-        f"╭─────────────────────\n"
-        f"├ ✅ <b>Заявка #{req_id} выплачена!</b>\n"
-        f"├\n"
-        f'├ 💸 Чек на <b>${amount:.2f} USDT</b>\n'
-        f'├ 🔗 {check_link}\n'
-        f"╰─────────────────────"
-    )
-    if msg_id:
-        try:
-            bot.edit_message_text(ok_text, chat_id, msg_id, parse_mode="HTML")
-            return
-        except Exception:
-            pass
-    bot.send_message(chat_id, ok_text, parse_mode="HTML")
-
-
-def _process_withdraw_reject(req_id: int, chat_id: int, msg_id: int | None = None):
-    req = withdraw_requests.get(req_id)
-    if not req:
-        bot.send_message(chat_id, f"❌ Заявка #{req_id} не найдена.")
-        return
-    if req["status"] != "pending":
-        bot.send_message(chat_id, f"⚠️ Заявка #{req_id} уже обработана.")
-        return
-
-    amount  = req["amount"]
-    user_id = req["user_id"]
-    req["status"] = "rejected"
-
-    u = get_user(user_id)
-    u["balance"] += amount
-    for h in reversed(u["history"]):
-        if h["status"] == "Вывод (ожидание)" and h["amount"] == -amount:
-            h["status"] = "Вывод отклонён"
-            break
-
-    try:
-        bot.send_message(
-            user_id,
-            f"╭─────────────────────\n"
-            f'├ <b><tg-emoji emoji-id="6030776052345737530">🎟</tg-emoji> Вывод отклонён</b>\n'
-            f"├\n"
-            f'├ <tg-emoji emoji-id="6039539366177541657">🎟</tg-emoji> '
-            f"Возвращено: <b>${amount:.2f}</b>\n"
-            f'├ <tg-emoji emoji-id="5258204546391351475">🎟</tg-emoji> '
-            f'Ваш баланс: <b>${u["balance"]:.2f}</b>\n'
-            f"├\n"
-            f"├ Обратитесь в поддержку за деталями\n"
-            f"╰─────────────────────",
-            parse_mode="HTML",
-        )
-    except Exception:
-        pass
-
-    rej_text = (
-        f"╭─────────────────────\n"
-        f"├ ❌ <b>Заявка #{req_id} отклонена.</b>\n"
-        f"╰─────────────────────"
-    )
-    if msg_id:
-        try:
-            bot.edit_message_text(rej_text, chat_id, msg_id, parse_mode="HTML")
-            return
-        except Exception:
-            pass
-    bot.send_message(chat_id, rej_text, parse_mode="HTML")
-
-# ══════════════════════════════════════════════════════
-#  Команды
-# ══════════════════════════════════════════════════════
-@bot.message_handler(commands=["getfileid"])
-def cmd_getfileid(message):
-    waiting_for_photo.add(message.from_user.id)
-    bot.send_message(message.chat.id,
-                     "Отправь фото — верну <b>file_id</b>", parse_mode="HTML")
-
-
-@bot.message_handler(commands=["take"])
-def cmd_take(message):
-    if not is_admin(message.from_user.id):
-        return
-    parts = message.text.strip().split()
-    if len(parts) < 2:
-        pl = [f"#{r} — ${withdraw_requests[r]['amount']:.2f}"
-              for r in withdraw_requests
-              if withdraw_requests[r]["status"] == "pending"]
-        if not pl:
-            bot.send_message(message.chat.id, "📭 Нет ожидающих заявок на вывод.")
+                response = self.llm(prompt, max_tokens=150, temperature=0.85, stop=["<|user|>"])
+                answer = response["choices"][0]["text"].strip()
+                if len(answer) < 3:
+                    answer = f"{section['emoji']} Интересно... Расскажи ещё!"
+            except:
+                answer = f"{section['emoji']} Что-то я задумался... Давай ещё раз!"
         else:
-            bot.send_message(
-                message.chat.id,
-                "╭─────────────────────\n"
-                "├ ⏳ <b>Ожидающие заявки:</b>\n├\n"
-                + "\n".join(f"├ {l}" for l in pl)
-                + "\n╰─────────────────────\n\nИспользуй: <code>/take [номер]</code>",
-                parse_mode="HTML",
-            )
-        return
-    try:
-        req_id = int(parts[1])
-    except ValueError:
-        bot.send_message(message.chat.id,
-                         "❌ Укажите числовой номер: <code>/take 4</code>",
-                         parse_mode="HTML")
-        return
-    _process_withdraw_take(req_id, message.chat.id)
-
-
-@bot.message_handler(commands=["reject"])
-def cmd_reject(message):
-    if not is_admin(message.from_user.id):
-        return
-    parts = message.text.strip().split()
-    if len(parts) < 2:
-        bot.send_message(message.chat.id,
-                         "❌ Укажите номер: <code>/reject 4</code>",
-                         parse_mode="HTML")
-        return
-    try:
-        req_id = int(parts[1])
-    except ValueError:
-        bot.send_message(message.chat.id, "❌ Укажите числовой номер.", parse_mode="HTML")
-        return
-    _process_withdraw_reject(req_id, message.chat.id)
-
-
-@bot.message_handler(commands=["takeall"])
-def cmd_takeall(message):
-    if not is_admin(message.from_user.id):
-        return
-    ids = [r for r in withdraw_requests
-           if withdraw_requests[r]["status"] == "pending"]
-    if not ids:
-        bot.send_message(message.chat.id, "📭 Нет ожидающих заявок.")
-        return
-    bot.send_message(message.chat.id, f"⏳ Обрабатываю {len(ids)} заявок...")
-    done = failed = 0
-    for req_id in ids:
-        if cryptobot_create_check(withdraw_requests[req_id]["amount"]):
-            _process_withdraw_take(req_id, message.chat.id)
-            done += 1
+            # Шаблонные ответы
+            answer = self.get_template_response(message, section_key)
+        
+        # Сохраняем ответ
+        self.save_message(telegram_id, "assistant", answer)
+        return answer, None
+    
+    def get_template_response(self, message: str, section: str) -> str:
+        """Шаблонные ответы без LLM"""
+        msg = message.lower()
+        emoji = SECTIONS[section]["emoji"]
+        
+        if "привет" in msg or "здрав" in msg:
+            replies = [
+                f"{emoji} Привет! Как дела?",
+                f"{emoji} О, привет! Давно не виделись!",
+                f"{emoji} Здорово! Чем порадуешь?"
+            ]
+        elif "как дела" in msg or "как жизнь" in msg:
+            replies = [
+                f"{emoji} Супер! А у тебя?",
+                f"{emoji} Норм, погода классная!",
+                f"{emoji} Отлично! Только что мемы смотрел 😂"
+            ]
+        elif "пока" in msg or "до свидан" in msg:
+            replies = [
+                f"{emoji} Пока-пока! Заходи ещё! 👋",
+                f"{emoji} Удачи! Напиши, если что!",
+                f"{emoji} До встречи! Обязательно возвращайся!"
+            ]
+        elif "спасиб" in msg:
+            replies = [
+                f"{emoji} Всегда пожалуйста! 😊",
+                f"{emoji} Обращайся, я всегда рад помочь!",
+                f"{emoji} Не за что! Приятно было поболтать!"
+            ]
         else:
-            failed += 1
-    bot.send_message(message.chat.id,
-                     f"✅ Принято: <b>{done}</b>  |  ❌ Ошибок: <b>{failed}</b>",
-                     parse_mode="HTML")
+            replies = [
+                f"{emoji} О, интересно! Расскажи подробнее!",
+                f"{emoji} Хм, я такого ещё не слышал 🤔",
+                f"{emoji} Вау! А что дальше?",
+                f"{emoji} Забавно! А как ты к этому относишься?"
+            ]
+        
+        return random.choice(replies)
 
+# ========== ИНИЦИАЛИЗАЦИЯ ==========
+bot_instance = BotInstance()
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
 
-@bot.message_handler(commands=["rejectall"])
-def cmd_rejectall(message):
-    if not is_admin(message.from_user.id):
-        return
-    ids = [r for r in withdraw_requests
-           if withdraw_requests[r]["status"] == "pending"]
-    if not ids:
-        bot.send_message(message.chat.id, "📭 Нет ожидающих заявок.")
-        return
-    for req_id in ids:
-        _process_withdraw_reject(req_id, message.chat.id)
-    bot.send_message(message.chat.id,
-                     f"❌ Отклонено: <b>{len(ids)}</b>", parse_mode="HTML")
+# ========== КЛАВИАТУРЫ ==========
+def get_section_keyboard():
+    builder = InlineKeyboardBuilder()
+    for key, section in SECTIONS.items():
+        builder.add(InlineKeyboardButton(
+            text=f"{section['emoji']} {section['name']}",
+            callback_data=f"section_{key}"
+        ))
+    builder.add(InlineKeyboardButton(text="ℹ️ Инфо", callback_data="info"))
+    builder.row()
+    builder.add(InlineKeyboardButton(text="🧹 Очистить историю", callback_data="clear"))
+    return builder.as_markup()
 
+# ========== ОБРАБОТЧИКИ КОМАНД ==========
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    user = message.from_user
+    bot_instance.register_user(user.id, user.username, user.first_name, user.last_name or "")
+    
+    current = bot_instance.get_section(user.id)
+    section = SECTIONS[current]
+    
+    text = f"""👋 Привет, {user.first_name}!
 
-@bot.message_handler(commands=["admin"])
-def cmd_admin(message):
-    if not is_admin(message.from_user.id):
-        return
-    bot.send_message(
-        message.chat.id,
-        f"╭─────────────────────\n"
-        f"├ <b>{em(EMOJI_ADMIN,'👑')} Панель администратора</b>\n"
-        f"├\n"
-        f'├ <tg-emoji emoji-id="5904462880941545555">🎟</tg-emoji> '
-        f'Выплата за номер: <b>${settings["payout"]:.2f}</b>\n'
-        f'├ <tg-emoji emoji-id="5258513401784573443">🎟</tg-emoji> '
-        f'Пользователей: <b>{len(users_db)}</b>\n'
-        f'├ <tg-emoji emoji-id="5258185631355378853">🎟</tg-emoji> '
-        f'Администраторов: <b>{len(ADMIN_IDS)}</b>\n'
-        f"╰─────────────────────",
-        parse_mode="HTML",
-        reply_markup=admin_panel_menu(),
+Я — бот с разными режимами общения!
+
+🎭 **Выбери свой раздел:**
+
+Сейчас активен: {section['emoji']} **{section['name']}**
+
+Нажми на кнопку, чтобы сменить персонажа! 👇"""
+    
+    await message.answer(text, reply_markup=get_section_keyboard(), parse_mode="Markdown")
+
+@dp.message(Command("clear"))
+async def cmd_clear(message: types.Message):
+    bot_instance.clear_history(message.from_user.id)
+    await message.answer("🧹 История очищена! Начинаем заново ✨")
+
+@dp.message(Command("status"))
+async def cmd_status(message: types.Message):
+    section_key = bot_instance.get_section(message.from_user.id)
+    section = SECTIONS[section_key]
+    
+    history = bot_instance.get_history(message.from_user.id)
+    
+    await message.answer(
+        f"""📊 **Твой статус:**
+
+{section['emoji']} Раздел: **{section['name']}**
+📝 Описание: {section['description']}
+💬 Сообщений в истории: {len(history)}
+
+Изменить раздел: /start""",
+        parse_mode="Markdown"
     )
 
+@dp.message(Command("meme"))
+async def cmd_meme(message: types.Message):
+    args = message.text.split(maxsplit=1)
+    text = args[1] if len(args) > 1 else "Смешной мем от бота!"
+    
+    meme = bot_instance.meme_maker.make_meme(
+        top_text="МЕМ ОТ БОТА",
+        bottom_text=text.upper()
+    )
+    
+    await message.answer_photo(
+        photo=types.BufferedInputFile(meme.getvalue(), filename="meme.png"),
+        caption=f"😂 Держи мем! Тема: {text}"
+    )
 
-@bot.message_handler(commands=["start", "menu"])
-def start(message):
-    uid  = message.from_user.id
-    user = get_user(uid)
-    user["username"]   = message.from_user.username or ""
-    user["first_name"] = message.from_user.first_name or ""
-    if user.get("banned"):
-        bot.send_message(message.chat.id, "🚫 Вы заблокированы.")
-        return
-    text = welcome_text(message.from_user, user)
-    if BANNER_FILE_ID:
-        bot.send_photo(message.chat.id, BANNER_FILE_ID,
-                       caption=text, parse_mode="HTML", reply_markup=main_menu())
+# ========== ОБРАБОТЧИК СООБЩЕНИЙ ==========
+@dp.message()
+async def handle_message(message: types.Message):
+    telegram_id = message.from_user.id
+    
+    # Показываем "печатает..."
+    await bot.send_chat_action(telegram_id, "typing")
+    
+    # Получаем ответ
+    response_text, image = bot_instance.generate_response(telegram_id, message.text)
+    
+    if image:
+        # Отправляем текст + картинку
+        await message.answer(response_text)
+        await message.answer_photo(
+            photo=types.BufferedInputFile(image.getvalue(), filename="meme.png"),
+            caption="😂 Мем от бота!"
+        )
     else:
-        bot.send_message(message.chat.id, text,
-                         parse_mode="HTML", reply_markup=main_menu())
+        # Только текст
+        await message.answer(response_text)
 
-# ══════════════════════════════════════════════════════
-#  Обработчики медиа
-# ══════════════════════════════════════════════════════
-@bot.message_handler(content_types=["photo"])
-def handle_photo(message):
-    uid = message.from_user.id
+# ========== ОБРАБОТЧИК КНОПОК ==========
+@dp.callback_query()
+async def handle_callback(callback: types.CallbackQuery):
+    await callback.answer()
+    
+    data = callback.data
+    telegram_id = callback.from_user.id
+    
+    if data == "info":
+        info = """📖 **Как пользоваться ботом:**
 
-    if uid in waiting_for_photo:
-        waiting_for_photo.discard(uid)
-        file_id = message.photo[-1].file_id
-        bot.send_message(message.chat.id,
-                         f"✅ <b>file_id</b>:\n\n<code>{file_id}</code>",
-                         parse_mode="HTML")
+1️⃣ Выбери персонажа в меню /start
+2️⃣ Просто пиши сообщения — бот отвечает в выбранном стиле
+3️⃣ Меняй раздел в любой момент через /start
+4️⃣ Команда /clear — очистить историю
+5️⃣ Команда /status — узнать текущий раздел
+6️⃣ Команда /meme [текст] — создать мем
+
+🎭 **Доступные разделы:**
+"""
+        for key, section in SECTIONS.items():
+            info += f"\n{section['emoji']} **{section['name']}** — {section['description']}"
+        
+        await callback.message.edit_text(info, parse_mode="Markdown")
         return
-
-    if uid in waiting_for_qr:
-        waiting_for_qr.discard(uid)
-        file_id = message.photo[-1].file_id
-        get_user(uid)["_pending_qr"] = file_id
-        bot.send_photo(
-            message.chat.id,
-            file_id,
-            caption=(
-                f"╭─────────────────────\n"
-                f'├ <b><tg-emoji emoji-id="6039496266180726678">🎟</tg-emoji> '
-                f"QR-код получен!</b>\n"
-                f"├\n"
-                f"├ Проверьте фото и нажмите\n"
-                f"├ <b>«Отправить заявку»</b>\n"
-                f"╰─────────────────────"
-            ),
-            parse_mode="HTML",
-            reply_markup=send_qr_btn(),
-        )
-
-# ══════════════════════════════════════════════════════
-#  Обработчик текста (состояния пользователя + админа)
-# ══════════════════════════════════════════════════════
-@bot.message_handler(content_types=["text"])
-def handle_text(message):
-    uid = message.from_user.id
-
-    # ── Ввод суммы вывода ──
-    if user_states.get(uid) == "waiting_withdraw_amount":
-        del user_states[uid]
-        raw = message.text.strip().replace(",", ".")
-        try:
-            amount = float(raw)
-        except ValueError:
-            bot.send_message(
-                message.chat.id,
-                "╭─────────────────────\n"
-                "├ ❌ <b>Некорректная сумма</b>\n"
-                "├\n"
-                "├ Введите число, например: <code>5.00</code>\n"
-                "╰─────────────────────",
-                parse_mode="HTML",
-                reply_markup=back_btn("balance"),
-            )
-            return
-        u = get_user(uid)
-        if amount < 1.0:
-            bot.send_message(
-                message.chat.id,
-                "╭─────────────────────\n"
-                "├ ❌ <b>Минимальная сумма вывода — $1.00</b>\n"
-                "╰─────────────────────",
-                parse_mode="HTML",
-                reply_markup=back_btn("balance"),
-            )
-            return
-        if amount > u["balance"]:
-            bot.send_message(
-                message.chat.id,
-                f"╭─────────────────────\n"
-                f"├ ❌ <b>Недостаточно средств</b>\n"
-                f"├\n"
-                f'├ Доступно: <b>${u["balance"]:.2f}</b>\n'
-                f"╰─────────────────────",
-                parse_mode="HTML",
-                reply_markup=back_btn("balance"),
-            )
-            return
-        bot.send_message(
-            message.chat.id,
-            withdraw_confirm_text(amount, u),
-            parse_mode="HTML",
-            reply_markup=withdraw_confirm_btn(amount),
-        )
+    
+    if data == "clear":
+        bot_instance.clear_history(telegram_id)
+        await callback.message.edit_text("🧹 История очищена! ✨")
         return
+    
+    if data.startswith("section_"):
+        section_key = data.replace("section_", "")
+        if section_key in SECTIONS:
+            bot_instance.set_section(telegram_id, section_key)
+            section = SECTIONS[section_key]
+            
+            await callback.message.edit_text(
+                f"""✅ Переключился на: {section['emoji']} **{section['name']}**
 
-    if uid not in admin_states:
-        return
+{section['description']}
 
-    state  = admin_states[uid]
-    action = state.get("action")
-    text   = message.text.strip()
-
-    # ── Рассылка ──
-    if action == "broadcast":
-        del admin_states[uid]
-        count = 0
-        for u_id in list(users_db.keys()):
-            try:
-                bot.send_message(u_id,
-                                 f"<b>Сообщение от администратора:</b>\n\n{text}",
-                                 parse_mode="HTML")
-                count += 1
-            except Exception:
-                pass
-        bot.send_message(message.chat.id,
-                         f"✅ Рассылка отправлена <b>{count}</b> пользователям.",
-                         parse_mode="HTML")
-
-    # ── Проверка пользователя ──
-    elif action == "check_user":
-        del admin_states[uid]
-        try:
-            target_id = int(text)
-        except ValueError:
-            bot.send_message(message.chat.id, "❌ Введите числовой ID")
-            return
-        u = users_db.get(target_id)
-        if not u:
-            bot.send_message(message.chat.id, "❌ Пользователь не найден")
-            return
-        in_q  = target_id in queue
-        q_pos = f"Да (позиция {queue.index(target_id)+1})" if in_q else "Нет"
-        bot.send_message(
-            message.chat.id,
-            f"╭─────────────────────\n"
-            f"├ 👤 <b>Пользователь {target_id}</b>\n"
-            f"├\n"
-            f"├ 📛 Имя: {esc(u['first_name'])}\n"
-            f"├ 🔗 Username: {'@'+esc(u['username']) if u['username'] else '—'}\n"
-            f"├ 💰 Баланс: <b>${u['balance']:.2f}</b>\n"
-            f"├ 📦 Сдано: <b>{u['numbers_rented']}</b>\n"
-            f"├ 🔄 В очереди: {q_pos}\n"
-            f"├ ⏳ На проверке: {'Да' if target_id in pending else 'Нет'}\n"
-            f"├ 🚫 Бан: {'Да' if u.get('banned') else 'Нет'}\n"
-            f"╰─────────────────────",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup().row(
-                InlineKeyboardButton(
-                    "🚫 Забанить" if not u.get("banned") else "✅ Разбанить",
-                    callback_data=f"adm_ban_{target_id}",
-                )
-            ),
-        )
-
-    elif action == "give_step1":
-        try:
-            admin_states[uid] = {"action": "give_step2", "target": int(text)}
-            bot.send_message(message.chat.id, "💵 Введите сумму (например: 10):")
-        except ValueError:
-            bot.send_message(message.chat.id, "❌ Введите числовой ID")
-            del admin_states[uid]
-
-    elif action == "give_step2":
-        try:
-            amount    = float(text)
-            target_id = state["target"]
-            u         = get_user(target_id)
-            u["balance"] += amount
-            u["history"].append({
-                "date":   datetime.date.today().strftime("%d.%m"),
-                "amount": amount, "status": "Пополнение",
-            })
-            del admin_states[uid]
-            bot.send_message(
-                message.chat.id,
-                f"✅ Начислено <b>${amount:.2f}</b> пользователю <code>{target_id}</code>",
-                parse_mode="HTML",
+Теперь я буду отвечать в этом стиле! Напиши что-нибудь 😊""",
+                reply_markup=get_section_keyboard(),
+                parse_mode="Markdown"
             )
-            try:
-                bot.send_message(
-                    target_id,
-                    f"💰 На ваш баланс начислено <b>${amount:.2f}</b>!",
-                    parse_mode="HTML",
-                )
-            except Exception:
-                pass
-        except ValueError:
-            bot.send_message(message.chat.id, "❌ Введите корректную сумму")
-            del admin_states[uid]
 
-    elif action == "take_step1":
-        try:
-            admin_states[uid] = {"action": "take_step2", "target": int(text)}
-            bot.send_message(message.chat.id, "💸 Введите сумму для списания:")
-        except ValueError:
-            bot.send_message(message.chat.id, "❌ Введите числовой ID")
-            del admin_states[uid]
+# ========== ЗАПУСК ==========
+async def main():
+    init_db()
+    logging.info("🤖 Бот запущен!")
+    await dp.start_polling(bot)
 
-    elif action == "take_step2":
-        try:
-            amount    = float(text)
-            target_id = state["target"]
-            u         = get_user(target_id)
-            u["balance"] = max(0, u["balance"] - amount)
-            u["history"].append({
-                "date":   datetime.date.today().strftime("%d.%m"),
-                "amount": -amount, "status": "Списание",
-            })
-            del admin_states[uid]
-            bot.send_message(
-                message.chat.id,
-                f"✅ Списано <b>${amount:.2f}</b> у пользователя <code>{target_id}</code>",
-                parse_mode="HTML",
-            )
-        except ValueError:
-            bot.send_message(message.chat.id, "❌ Введите корректную сумму")
-            del admin_states[uid]
-
-    elif action == "set_payout":
-        try:
-            amount           = float(text)
-            settings["payout"] = amount
-            del admin_states[uid]
-            bot.send_message(
-                message.chat.id,
-                f"✅ Выплата за номер изменена на <b>${amount:.2f}</b>",
-                parse_mode="HTML",
-            )
-        except ValueError:
-            bot.send_message(message.chat.id, "❌ Введите корректную сумму")
-            del admin_states[uid]
-
-    elif action == "reject_reason":
-        target_id = state["target"]
-        reason    = text
-        del admin_states[uid]
-
-        # Пометить сообщения у всех администраторов
-        for (achat, amsg) in pending_admin_msgs.get(target_id, []):
-            try:
-                bot.edit_message_caption(
-                    caption=f"❌ <b>ОТКЛОНЕНО</b>\n📝 Причина: {esc(reason)}",
-                    chat_id=achat, message_id=amsg, parse_mode="HTML",
-                )
-            except Exception:
-                pass
-
-        _finish_qr_review(target_id)
-
-        try:
-            bot.send_message(
-                target_id,
-                f"╭─────────────────────\n"
-                f"├ ❌ <b>Ваша заявка отклонена</b>\n"
-                f"├\n"
-                f"├ 📝 Причина: {esc(reason)}\n"
-                f"├\n"
-                f"├ Вы добавлены обратно в очередь.\n"
-                f"╰─────────────────────",
-                parse_mode="HTML",
-            )
-        except Exception:
-            pass
-        bot.send_message(message.chat.id,
-                         "✅ Заявка отклонена, пользователь уведомлён.")
-
-# ══════════════════════════════════════════════════════
-#  Обработчик callback-кнопок
-# ══════════════════════════════════════════════════════
-@bot.callback_query_handler(func=lambda call: True)
-def callback_handler(call):
-    bot.answer_callback_query(call.id)
-    uid     = call.from_user.id
-    chat_id = call.message.chat.id
-    msg_id  = call.message.message_id
-    data    = call.data
-    user    = get_user(uid)
-
-    def edit(text, markup=None):
-        try:
-            if call.message.photo:
-                bot.edit_message_caption(caption=text, chat_id=chat_id,
-                                         message_id=msg_id,
-                                         parse_mode="HTML", reply_markup=markup)
-            else:
-                bot.edit_message_text(text, chat_id, msg_id,
-                                      parse_mode="HTML", reply_markup=markup)
-        except Exception as e:
-            print(f"[edit] {e}")
-            try:
-                bot.send_message(chat_id, text,
-                                 parse_mode="HTML", reply_markup=markup)
-            except Exception as e2:
-                print(f"[edit fallback] {e2}")
-
-    # ── Назад в меню ──
-    if data == "back_menu":
-        user_states.pop(uid, None)
-        text = welcome_text(call.from_user, user)
-        try:
-            if BANNER_FILE_ID:
-                bot.edit_message_media(
-                    InputMediaPhoto(BANNER_FILE_ID, caption=text, parse_mode="HTML"),
-                    chat_id, msg_id, reply_markup=main_menu(),
-                )
-            else:
-                edit(text, main_menu())
-        except Exception:
-            edit(text, main_menu())
-
-    elif data == "rules":
-        edit(rules_text(), back_btn())
-
-    elif data == "balance":
-        user_states.pop(uid, None)
-        edit(balance_text(user), balance_menu())
-
-    elif data == "history":
-        edit(history_text(user), back_btn())
-
-    elif data == "statistics":
-        edit(statistics_text(), back_btn())
-
-    # ── Сдать номер ──
-    elif data == "submit_number":
-        if user.get("banned"):
-            bot.answer_callback_query(call.id, "🚫 Вы заблокированы!",
-                                      show_alert=True)
-            return
-
-        # Заявка уже на проверке → показать кнопку отмены
-        if uid in pending:
-            edit(
-                f"╭─────────────────────\n"
-                f"├ ⏳ <b>Заявка на проверке</b>\n"
-                f"├\n"
-                f"├ Ваш QR-код отправлен администратору.\n"
-                f"├ Дождитесь решения или отмените заявку.\n"
-                f"╰─────────────────────",
-                pending_menu(),
-            )
-            return
-
-        # Очередь: пользователь не первый
-        if QUEUE_ENABLED:
-            if uid not in queue:
-                queue.append(uid)
-            pos = queue.index(uid) + 1
-            if pos > 1:
-                edit(queue_text(pos), back_btn())
-                return
-            # Позиция 1 → переходим к отправке
-
-        edit(submit_price_text(), submit_menu())
-
-    # ── Отмена заявки пользователем ──
-    elif data == "cancel_application":
-        if uid not in pending:
-            bot.answer_callback_query(call.id, "❌ Нет активной заявки!",
-                                      show_alert=True)
-            return
-
-        # Пометить сообщения у всех администраторов
-        for (achat, amsg) in pending_admin_msgs.get(uid, []):
-            try:
-                bot.edit_message_caption(
-                    caption="🚫 <b>ЗАЯВКА ОТМЕНЕНА ПОЛЬЗОВАТЕЛЕМ</b>\n"
-                            f"ID: <code>{uid}</code>",
-                    chat_id=achat, message_id=amsg, parse_mode="HTML",
-                )
-            except Exception:
-                pass
-
-        _finish_qr_review(uid)
-
-        edit(
-            f"╭─────────────────────\n"
-            f"├ ✅ <b>Заявка отменена</b>\n"
-            f"├\n"
-            f"├ Вы добавлены в конец очереди.\n"
-            f"├ Когда подойдёт очередь — сможете\n"
-            f"├ отправить новый QR-код.\n"
-            f"╰─────────────────────",
-            back_btn(),
-        )
-
-    # ── Прикрепить QR-код ──
-    elif data == "attach_qr":
-        waiting_for_qr.add(uid)
-        edit(
-            f"╭─────────────────────\n"
-            f'├ <b><tg-emoji emoji-id="5258108352008823107">🎟</tg-emoji> '
-            f"Отправьте фото QR-кода</b>\n"
-            f"├\n"
-            f"├ Просто прикрепите изображение\n"
-            f"├ к этому чату\n"
-            f"╰─────────────────────",
-            back_btn(),
-        )
-
-    # ── Отправить QR на проверку ──
-    elif data == "send_qr":
-        qr_file_id = user.get("_pending_qr")
-        if not qr_file_id:
-            bot.answer_callback_query(call.id, "❌ Сначала прикрепите QR-код!",
-                                      show_alert=True)
-            return
-
-        del user["_pending_qr"]
-
-        # Убираем пользователя из очереди — он «использовал» свой ход
-        if uid in queue:
-            queue.remove(uid)
-
-        pending[uid] = msg_id
-
-        name     = esc(call.from_user.first_name or "—")
-        username = f"@{esc(call.from_user.username)}" if call.from_user.username else "—"
-        admin_cap = (
-            f"╭─────────────────────\n"
-            f'├ <b><tg-emoji emoji-id="5258108352008823107">🎟</tg-emoji> '
-            f"Новая заявка на сдачу номера</b>\n"
-            f"├\n"
-            f'├ <tg-emoji emoji-id="5260399854500191689">🎟</tg-emoji> Имя: {name}\n'
-            f'├ <tg-emoji emoji-id="5323442290708985472">🎟</tg-emoji> Username: {username}\n'
-            f'├ <tg-emoji emoji-id="5282843764451195532">🎟</tg-emoji> ID: <code>{uid}</code>\n'
-            f'├ <tg-emoji emoji-id="5440621591387980068">🎟</tg-emoji> '
-            f'Дата: {datetime.date.today().strftime("%d.%m.%Y")}\n'
-            f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> '
-            f'Выплата: <b>${settings["payout"]:.2f}</b>\n'
-            f"╰─────────────────────"
-        )
-
-        # Рассылаем всем администраторам и запоминаем msg_id
-        sent = notify_all_admins(
-            photo=qr_file_id,
-            caption=admin_cap,
-            markup=admin_review_btn(uid),
-        )
-        pending_admin_msgs[uid] = sent
-
-        edit(
-            f"╭─────────────────────\n"
-            f'├ <b><tg-emoji emoji-id="5258043150110301407">🎟</tg-emoji> '
-            f"Заявка отправлена!</b>\n"
-            f"├\n"
-            f'├ <tg-emoji emoji-id="5440621591387980068">🎟</tg-emoji> '
-            f"Ожидайте решения администратора\n"
-            f"├ Мы уведомим вас о результате\n"
-            f"╰─────────────────────",
-            back_btn(),
-        )
-
-    # ── Вывод ──
-    elif data == "withdraw":
-        if user.get("banned"):
-            bot.answer_callback_query(call.id, "🚫 Вы заблокированы!",
-                                      show_alert=True)
-            return
-        if user["balance"] < 1.0:
-            bot.answer_callback_query(call.id,
-                                      "❌ Недостаточно средств! Минимум $1.00",
-                                      show_alert=True)
-            return
-        user_states[uid] = "waiting_withdraw_amount"
-        try:
-            if call.message.photo:
-                bot.edit_message_caption(
-                    caption=withdraw_text(user),
-                    chat_id=chat_id, message_id=msg_id,
-                    parse_mode="HTML", reply_markup=back_btn("balance"),
-                )
-            else:
-                bot.edit_message_text(
-                    withdraw_text(user), chat_id, msg_id,
-                    parse_mode="HTML", reply_markup=back_btn("balance"),
-                )
-        except Exception as e:
-            print(f"[withdraw edit] {e}")
-            bot.send_message(chat_id, withdraw_text(user),
-                             parse_mode="HTML", reply_markup=back_btn("balance"))
-
-    elif data.startswith("withdraw_confirm_"):
-        try:
-            amount = float(data.split("withdraw_confirm_")[1])
-        except Exception:
-            return
-        if user["balance"] < amount:
-            bot.answer_callback_query(call.id, "❌ Недостаточно средств!",
-                                      show_alert=True)
-            return
-        user["balance"] -= amount
-        user["history"].append({
-            "date":   datetime.date.today().strftime("%d.%m"),
-            "amount": -amount,
-            "status": "Вывод (ожидание)",
-        })
-        withdraw_counter[0] += 1
-        req_id     = withdraw_counter[0]
-        first_name = esc(call.from_user.first_name or "—")
-        username   = (f"@{esc(call.from_user.username)}"
-                      if call.from_user.username else "—")
-        withdraw_requests[req_id] = {
-            "user_id":    uid,
-            "amount":     amount,
-            "status":     "pending",
-            "first_name": first_name,
-            "username":   username,
-        }
-        edit(
-            f"╭─────────────────────\n"
-            f'├ <b><tg-emoji emoji-id="5258043150110301407">🎟</tg-emoji> '
-            f"Заявка отправлена!</b>\n"
-            f"├\n"
-            f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> '
-            f"Сумма: <b>${amount:.2f} USDT</b>\n"
-            f'├ <tg-emoji emoji-id="6030537810509828330">🎟</tg-emoji> '
-            f"Номер заявки: <b>#{req_id}</b>\n"
-            f"├\n"
-            f"├ Ожидайте — администратор обработает\n"
-            f"├ заявку и пришлёт чек CryptoBot\n"
-            f"╰─────────────────────",
-            back_btn(),
-        )
-        notify_all_admins(
-            withdraw_pending_admin_text(req_id, uid, amount, first_name, username),
-            markup=admin_withdraw_btn(req_id),
-        )
-
-    elif data.startswith("wd_take_"):
-        if not is_admin(uid):
-            return
-        try:
-            req_id = int(data.split("wd_take_")[1])
-        except Exception:
-            return
-        _process_withdraw_take(req_id, chat_id, msg_id)
-
-    elif data.startswith("wd_reject_"):
-        if not is_admin(uid):
-            return
-        try:
-            req_id = int(data.split("wd_reject_")[1])
-        except Exception:
-            return
-        _process_withdraw_reject(req_id, chat_id, msg_id)
-
-    # ── Одобрить QR ──
-    elif data.startswith("approve_"):
-        if not is_admin(uid):
-            return
-        target_id = int(data.split("_")[1])
-        u = get_user(target_id)
-        u["balance"]        += settings["payout"]
-        u["numbers_rented"] += 1
-        u["history"].append({
-            "date":   datetime.date.today().strftime("%d.%m"),
-            "amount": settings["payout"],
-            "status": "Одобрено",
-        })
-
-        _finish_qr_review(target_id)   # → в конец очереди
-
-        try:
-            bot.send_message(
-                target_id,
-                f"╭─────────────────────\n"
-                f'├ <b><tg-emoji emoji-id="5258215846450305872">🎟</tg-emoji> '
-                f"Заявка принята!</b>\n"
-                f"├\n"
-                f'├ <tg-emoji emoji-id="5890848474563352982">🎟</tg-emoji> '
-                f'Начислено: <b>${settings["payout"]:.2f}</b>\n'
-                f'├ <tg-emoji emoji-id="5258204546391351475">🎟</tg-emoji> '
-                f'Ваш баланс: <b>${u["balance"]:.2f}</b>\n'
-                f"├\n"
-                f"├ Вы добавлены в конец очереди.\n"
-                f"╰─────────────────────",
-                parse_mode="HTML",
-            )
-        except Exception:
-            pass
-        try:
-            bot.edit_message_caption(
-                caption=call.message.caption
-                        + f"\n\n✅ <b>ПРИНЯТО</b> — начислено ${settings['payout']:.2f}",
-                chat_id=chat_id, message_id=msg_id, parse_mode="HTML",
-            )
-        except Exception:
-            pass
-
-    # ── Отклонить QR (запрос причины) ──
-    elif data.startswith("reject_"):
-        if not is_admin(uid):
-            return
-        target_id             = int(data.split("_")[1])
-        admin_states[uid]     = {"action": "reject_reason", "target": target_id}
-        try:
-            bot.edit_message_caption(
-                caption=call.message.caption
-                        + "\n\n❌ <b>Отклоняется...</b>\nВведите причину отказа:",
-                chat_id=chat_id, message_id=msg_id, parse_mode="HTML",
-            )
-        except Exception:
-            bot.send_message(chat_id, "✏️ Введите причину отказа:")
-
-    # ── Статистика (общая) ──
-    elif data == "adm_stats":
-        if not is_admin(uid):
-            return
-        bot.send_message(
-            chat_id,
-            f"╭─────────────────────\n"
-            f"├ 📊 <b>Статистика бота</b>\n"
-            f"├\n"
-            f"├ 👥 Пользователей: <b>{len(users_db)}</b>\n"
-            f"├ 📦 Всего сдано: <b>{sum(u['numbers_rented'] for u in users_db.values())}</b>\n"
-            f"├ 💰 На балансах: <b>${sum(u['balance'] for u in users_db.values()):.2f}</b>\n"
-            f"├ 🔄 В очереди: <b>{len(queue)}</b>\n"
-            f"├ ⏳ На проверке: <b>{len(pending)}</b>\n"
-            f"├ 💵 Выплата: <b>${settings['payout']:.2f}</b>\n"
-            f"├ 👑 Администраторов: <b>{len(ADMIN_IDS)}</b>\n"
-            f"╰─────────────────────",
-            parse_mode="HTML",
-        )
-
-    # ── Топ-20 пользователей ──
-    elif data == "adm_top_stats":
-        if not is_admin(uid):
-            return
-        bot.send_message(chat_id, admin_top_stats_text(), parse_mode="HTML")
-
-    elif data == "adm_check":
-        if not is_admin(uid):
-            return
-        admin_states[uid] = {"action": "check_user"}
-        bot.send_message(chat_id, "🔍 Введите ID пользователя:")
-
-    elif data == "adm_give":
-        if not is_admin(uid):
-            return
-        admin_states[uid] = {"action": "give_step1"}
-        bot.send_message(chat_id, "💰 Введите ID пользователя для начисления:")
-
-    elif data == "adm_take":
-        if not is_admin(uid):
-            return
-        admin_states[uid] = {"action": "take_step1"}
-        bot.send_message(chat_id, "💸 Введите ID пользователя для списания:")
-
-    elif data == "adm_reset_all":
-        if not is_admin(uid):
-            return
-        mk = InlineKeyboardMarkup()
-        mk.row(
-            InlineKeyboardButton("✅ Да, обнулить", callback_data="adm_reset_confirm"),
-            InlineKeyboardButton("❌ Отмена",        callback_data="adm_cancel"),
-        )
-        bot.send_message(chat_id, "⚠️ <b>Обнулить баланс ВСЕХ пользователей?</b>",
-                         parse_mode="HTML", reply_markup=mk)
-
-    elif data == "adm_reset_confirm":
-        if not is_admin(uid):
-            return
-        for u in users_db.values():
-            u["balance"] = 0.0
-            u["history"].append({
-                "date":   datetime.date.today().strftime("%d.%m"),
-                "amount": 0,
-                "status": "Обнуление",
-            })
-        try:
-            bot.edit_message_text("✅ Балансы всех пользователей обнулены.",
-                                  chat_id, msg_id)
-        except Exception:
-            bot.send_message(chat_id, "✅ Балансы всех пользователей обнулены.")
-
-    elif data == "adm_cancel":
-        if not is_admin(uid):
-            return
-        try:
-            bot.delete_message(chat_id, msg_id)
-        except Exception:
-            pass
-
-    elif data == "adm_broadcast":
-        if not is_admin(uid):
-            return
-        admin_states[uid] = {"action": "broadcast"}
-        bot.send_message(chat_id, "📢 Введите текст рассылки:")
-
-    elif data == "adm_payout":
-        if not is_admin(uid):
-            return
-        admin_states[uid] = {"action": "set_payout"}
-        bot.send_message(
-            chat_id,
-            f"💵 Текущая выплата: <b>${settings['payout']:.2f}</b>\n\nВведите новую сумму:",
-            parse_mode="HTML",
-        )
-
-    elif data.startswith("adm_ban_"):
-        if not is_admin(uid):
-            return
-        target_id      = int(data.split("_")[2])
-        u              = get_user(target_id)
-        u["banned"]    = not u.get("banned", False)
-        status         = "🚫 Заблокирован" if u["banned"] else "✅ Разблокирован"
-        bot.send_message(chat_id,
-                         f"{status}: <code>{target_id}</code>",
-                         parse_mode="HTML")
-        try:
-            bot.send_message(
-                target_id,
-                "🚫 Вы заблокированы администратором."
-                if u["banned"]
-                else "✅ Ваш аккаунт разблокирован.",
-            )
-        except Exception:
-            pass
-
-
-# ══════════════════════════════════════════════════════
 if __name__ == "__main__":
-    print("✅ Бот Аренда MAX запущен...")
-    print(f"   💵 Выплата: ${settings['payout']:.2f}")
-    print(f"   👑 Admin IDs: {ADMIN_IDS}")
-    bot.infinity_polling()
+    asyncio.run(main())
