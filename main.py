@@ -76,6 +76,127 @@ def get_period_stats(user_id: int, period: str) -> dict[str, float]:
 
     return stats
 
+
+# --------------------------------------------------------------------------
+# Хранилище данных о пользователях (временное, in-memory) — чтобы можно было
+# показать ник/имя игрока в топе и других списках.
+# --------------------------------------------------------------------------
+
+USER_INFO: dict[int, dict[str, str | None]] = {}
+
+
+def remember_user(user) -> None:
+    """Запоминает имя и юзернейм пользователя (для отображения, например, в топе)."""
+    USER_INFO[user.id] = {
+        "full_name": user.full_name,
+        "username": user.username,
+    }
+
+
+def get_display_name(user_id: int) -> str:
+    """Ник (имя) пользователя, а если его нет — юзернейм."""
+    info = USER_INFO.get(user_id)
+    if not info:
+        return f"Игрок {user_id}"
+
+    full_name = info.get("full_name")
+    if full_name:
+        return full_name
+
+    username = info.get("username")
+    if username:
+        return f"@{username}"
+
+    return f"Игрок {user_id}"
+
+
+# --------------------------------------------------------------------------
+# Хранилище игровых раундов (временное, in-memory) — для топа игроков по
+# обороту, выигрышам и количеству игр.
+# --------------------------------------------------------------------------
+# NOTE: заглушка, как и USER_TRANSACTIONS. Когда появится БД и игровой
+# движок, каждый сыгранный раунд нужно будет логировать сюда (или сразу в
+# БД с полем timestamp), чтобы get_top_players считал реальные значения.
+
+USER_GAME_ROUNDS: dict[int, list[dict]] = {}
+
+
+def log_game_round(user_id: int, bet: float, win: float) -> None:
+    """Логирует сыгранный раунд игры (ставка/выигрыш) для последующего подсчёта топа."""
+    USER_GAME_ROUNDS.setdefault(user_id, []).append(
+        {
+            "timestamp": datetime.now(timezone.utc),
+            "bet": bet,
+            "win": win,
+        }
+    )
+
+
+TOP_PERIOD_DAYS = {"day": 1, "week": 7, "month": 30, "all": None}
+TOP_PERIOD_LABELS = {"day": "День", "week": "Неделя", "month": "Месяц", "all": "Всё время"}
+
+TOP_CATEGORY_LABELS = {
+    "turnover": "Оборот",
+    "wins": "Выигрыши",
+    "games": "Кол-во игр",
+}
+# Эмодзи подобраны из уже используемых в боте (профиль/статистика/меню)
+TOP_CATEGORY_EMOJI_IDS = {
+    "turnover": "5778421276024509124",  # 💰 — как в "Оборот" в профиле/статистике
+    "wins": "5902206159095339799",  # 🤑 — денежный выигрыш
+    "games": "5260547274957672345",  # 🎲 — как в "Lucky Dice"
+}
+# Эмодзи периодов — те же, что в статистике
+TOP_PERIOD_EMOJI_ID = "5890937706803894250"
+
+# Emoji ID для позиций 1–10 в топе
+TOP_POSITION_EMOJI_IDS = [
+    "5794164805065514131",
+    "5794085322400733645",
+    "5794280000383358988",
+    "5794241397217304511",
+    "5793985348446984682",
+    "5794324702402976226",
+    "5793942849745591465",
+    "5793926687783655907",
+    "5793979472931723221",
+    "5794375786743995258",
+]
+
+
+def get_top_players(category: str, period: str, limit: int = 10) -> list[tuple[int, float]]:
+    """Считает топ игроков по выбранной категории (оборот/выигрыши/кол-во игр) за период."""
+    days = TOP_PERIOD_DAYS.get(period)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days) if days else None
+
+    aggregated: dict[int, float] = {}
+    for user_id, rounds in USER_GAME_ROUNDS.items():
+        turnover = 0.0
+        wins = 0.0
+        games = 0
+
+        for round_ in rounds:
+            if cutoff and round_["timestamp"] < cutoff:
+                continue
+            turnover += round_["bet"]
+            wins += round_["win"]
+            games += 1
+
+        if games == 0:
+            continue
+
+        if category == "turnover":
+            value = turnover
+        elif category == "wins":
+            value = wins
+        else:  # "games"
+            value = float(games)
+
+        aggregated[user_id] = value
+
+    return sorted(aggregated.items(), key=lambda item: item[1], reverse=True)[:limit]
+
+
 # --------------------------------------------------------------------------
 # Форматирование
 # --------------------------------------------------------------------------
@@ -224,6 +345,36 @@ def stats_period_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def top_keyboard(category: str, period: str) -> InlineKeyboardMarkup:
+    def category_button(cat: str) -> InlineKeyboardButton:
+        return InlineKeyboardButton(
+            text=("• " if cat == category else "") + TOP_CATEGORY_LABELS[cat],
+            callback_data=f"top:{cat}:{period}",
+            icon_custom_emoji_id=TOP_CATEGORY_EMOJI_IDS[cat],
+        )
+
+    def period_button(per: str) -> InlineKeyboardButton:
+        return InlineKeyboardButton(
+            text=("• " if per == period else "") + TOP_PERIOD_LABELS[per],
+            callback_data=f"top:{category}:{per}",
+            icon_custom_emoji_id=TOP_PERIOD_EMOJI_ID,
+        )
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [category_button("turnover"), category_button("wins"), category_button("games")],
+            [period_button("day"), period_button("week"), period_button("month"), period_button("all")],
+            [
+                InlineKeyboardButton(
+                    text="Назад",
+                    callback_data="menu:back",
+                    icon_custom_emoji_id="6039539366177541657",
+                ),
+            ],
+        ]
+    )
+
+
 # --------------------------------------------------------------------------
 # Хендлеры
 # --------------------------------------------------------------------------
@@ -287,8 +438,36 @@ def format_stats_text(user_id: int, period: str) -> str:
     )
 
 
+def format_top_text(category: str, period: str) -> str:
+    top_players = get_top_players(category, period)
+    category_label = TOP_CATEGORY_LABELS.get(category, "Оборот")
+    period_label = TOP_PERIOD_LABELS.get(period, "День")
+
+    header = (
+        '<tg-emoji emoji-id="6037083366438737901">🏆</tg-emoji> '
+        f"<b>Топ — {category_label} — {period_label}</b>"
+    )
+
+    if not top_players:
+        return f"{header}\n\n└ Нет данных за этот период."
+
+    lines = []
+    for index, (user_id, value) in enumerate(top_players):
+        if index < len(TOP_POSITION_EMOJI_IDS):
+            position = f'<tg-emoji emoji-id="{TOP_POSITION_EMOJI_IDS[index]}">{index + 1}️⃣</tg-emoji>'
+        else:
+            position = f"{index + 1}."
+
+        name = get_display_name(user_id)
+        value_text = f"{int(value)}" if category == "games" else f"${value:,.2f}"
+        lines.append(f"{position} <b>{name}</b> — {value_text}")
+
+    return f"{header}\n\n" + "\n".join(lines)
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
+    remember_user(message.from_user)
     await message.answer(
         f"Привет, {message.from_user.full_name}! 👋\n\n"
         "Выберите раздел из меню ниже.",
@@ -298,6 +477,7 @@ async def cmd_start(message: Message) -> None:
 
 @router.message(F.text == "Меню")
 async def show_menu(message: Message) -> None:
+    remember_user(message.from_user)
     text = (
         '<tg-emoji emoji-id="5260547274957672345">🎲</tg-emoji> '
         "<b>Lucky Dice</b> — испытай удачу!\n\n"
@@ -311,17 +491,20 @@ async def show_menu(message: Message) -> None:
 
 @router.message(F.text == "Игры")
 async def games_section(message: Message) -> None:
+    remember_user(message.from_user)
     await message.answer(IN_DEV_TEXT)
 
 
 @router.message(F.text == "Партнеры")
 async def partners_section(message: Message) -> None:
+    remember_user(message.from_user)
     await message.answer(IN_DEV_TEXT)
 
 
 @router.callback_query(F.data == "menu:profile")
 async def profile_section(callback: CallbackQuery) -> None:
     user = callback.from_user
+    remember_user(user)
     text = format_profile_text(user.id, user.full_name, user.username)
 
     await callback.message.edit_text(text, reply_markup=profile_inline_keyboard())
@@ -340,6 +523,7 @@ async def profile_withdraw(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "menu:stats")
 async def stats_section(callback: CallbackQuery) -> None:
+    remember_user(callback.from_user)
     text = format_stats_text(callback.from_user.id, "day")
     await callback.message.edit_text(text, reply_markup=stats_period_keyboard())
     await callback.answer()
@@ -347,14 +531,33 @@ async def stats_section(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("stats:"))
 async def stats_period_switch(callback: CallbackQuery) -> None:
+    remember_user(callback.from_user)
     period = callback.data.split(":", 1)[1]
     text = format_stats_text(callback.from_user.id, period)
     await callback.message.edit_text(text, reply_markup=stats_period_keyboard())
     await callback.answer()
 
 
+@router.callback_query(F.data == "menu:top")
+async def top_section(callback: CallbackQuery) -> None:
+    remember_user(callback.from_user)
+    text = format_top_text("turnover", "day")
+    await callback.message.edit_text(text, reply_markup=top_keyboard("turnover", "day"))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("top:"))
+async def top_switch(callback: CallbackQuery) -> None:
+    remember_user(callback.from_user)
+    _, category, period = callback.data.split(":", 2)
+    text = format_top_text(category, period)
+    await callback.message.edit_text(text, reply_markup=top_keyboard(category, period))
+    await callback.answer()
+
+
 @router.callback_query(F.data == "menu:back")
 async def back_to_menu(callback: CallbackQuery) -> None:
+    remember_user(callback.from_user)
     text = (
         '<tg-emoji emoji-id="5260547274957672345">🎲</tg-emoji> '
         "<b>Lucky Dice</b> — испытай удачу!\n\n"
