@@ -31,8 +31,11 @@ IN_DEV_TEXT = "🚧 Этот раздел находится в разработ
 def main_reply_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📋 Меню")],
-            [KeyboardButton(text="🎮 Игры"), KeyboardButton(text="🤝 Партнеры")],
+            [
+                KeyboardButton(text="📋 Меню", style="primary"),
+                KeyboardButton(text="🎮 Игры", style="primary"),
+                KeyboardButton(text="🤝 Партнеры", style="primary"),
+            ],
         ],
         resize_keyboard=True,
         input_field_placeholder="Выберите раздел...",
@@ -42,11 +45,17 @@ def main_reply_keyboard() -> ReplyKeyboardMarkup:
 def menu_inline_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="👤 Профиль", callback_data="menu:profile")],
-            [InlineKeyboardButton(text="📊 Статистика", callback_data="menu:stats")],
-            [InlineKeyboardButton(text="🏆 Топ", callback_data="menu:top")],
-            [InlineKeyboardButton(text="🧾 Чеки", callback_data="menu:checks")],
-            [InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support")],
+            [
+                InlineKeyboardButton(text="👤 Профиль", callback_data="menu:profile"),
+                InlineKeyboardButton(text="📊 Статистика", callback_data="menu:stats"),
+            ],
+            [
+                InlineKeyboardButton(text="🏆 Топ", callback_data="menu:top"),
+                InlineKeyboardButton(text="🧾 Чеки", callback_data="menu:checks"),
+            ],
+            [
+                InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support"),
+            ],
         ]
     )
 
