@@ -32,9 +32,21 @@ def main_reply_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [
-                KeyboardButton(text="📋 Меню", style="primary"),
-                KeyboardButton(text="🎮 Игры", style="primary"),
-                KeyboardButton(text="🤝 Партнеры", style="primary"),
+                KeyboardButton(
+                    text="Меню",
+                    style="primary",
+                    icon_custom_emoji_id="5257965174979042426",
+                ),
+                KeyboardButton(
+                    text="Игры",
+                    style="primary",
+                    icon_custom_emoji_id="5350708744558753862",
+                ),
+                KeyboardButton(
+                    text="Партнеры",
+                    style="primary",
+                    icon_custom_emoji_id="5258362837411045098",
+                ),
             ],
         ],
         resize_keyboard=True,
@@ -46,15 +58,35 @@ def menu_inline_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="👤 Профиль", callback_data="menu:profile"),
-                InlineKeyboardButton(text="📊 Статистика", callback_data="menu:stats"),
+                InlineKeyboardButton(
+                    text="Профиль",
+                    callback_data="menu:profile",
+                    icon_custom_emoji_id="5316727448644103237",
+                ),
+                InlineKeyboardButton(
+                    text="Статистика",
+                    callback_data="menu:stats",
+                    icon_custom_emoji_id="5258330865674494479",
+                ),
             ],
             [
-                InlineKeyboardButton(text="🏆 Топ", callback_data="menu:top"),
-                InlineKeyboardButton(text="🧾 Чеки", callback_data="menu:checks"),
+                InlineKeyboardButton(
+                    text="Топ",
+                    callback_data="menu:top",
+                    icon_custom_emoji_id="6037083366438737901",
+                ),
+                InlineKeyboardButton(
+                    text="Чеки",
+                    callback_data="menu:checks",
+                    icon_custom_emoji_id="6037175527846975726",
+                ),
             ],
             [
-                InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support"),
+                InlineKeyboardButton(
+                    text="Поддержка",
+                    callback_data="menu:support",
+                    icon_custom_emoji_id="5812150667812280629",
+                ),
             ],
         ]
     )
@@ -76,17 +108,17 @@ async def cmd_start(message: Message) -> None:
     )
 
 
-@router.message(F.text == "📋 Меню")
+@router.message(F.text == "Меню")
 async def show_menu(message: Message) -> None:
     await message.answer("Выберите раздел:", reply_markup=menu_inline_keyboard())
 
 
-@router.message(F.text == "🎮 Игры")
+@router.message(F.text == "Игры")
 async def games_section(message: Message) -> None:
     await message.answer(IN_DEV_TEXT)
 
 
-@router.message(F.text == "🤝 Партнеры")
+@router.message(F.text == "Партнеры")
 async def partners_section(message: Message) -> None:
     await message.answer(IN_DEV_TEXT)
 
