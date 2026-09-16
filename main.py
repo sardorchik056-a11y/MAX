@@ -24,6 +24,14 @@ BOT_TOKEN = "8841055640:AAE65cYHaE9XVEo2fQLwZ5kPxrR1Fncqm5Q"
 
 IN_DEV_TEXT = "🚧 Этот раздел находится в разработке.\nСкоро здесь появится функционал!"
 
+SUPPORT_TEXT = (
+    '<tg-emoji emoji-id="5812150667812280629">🛠</tg-emoji> <b>Поддержка</b>\n\n'
+    "<i>Возникли вопросы или проблема с игрой, депозитом или выводом?\n"
+    "Напишите нам — ответим как можно быстрее.</i>\n\n"
+    "└ Оператор: @luckydicesupport\n"
+    "└ Среднее время ответа: ~10 минут"
+)
+
 # --------------------------------------------------------------------------
 # Хранилище профилей (временное, in-memory)
 # --------------------------------------------------------------------------
@@ -375,6 +383,20 @@ def top_keyboard(category: str, period: str) -> InlineKeyboardMarkup:
     )
 
 
+def support_inline_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Назад",
+                    callback_data="menu:back",
+                    icon_custom_emoji_id="6039539366177541657",
+                ),
+            ],
+        ]
+    )
+
+
 # --------------------------------------------------------------------------
 # Хендлеры
 # --------------------------------------------------------------------------
@@ -552,6 +574,13 @@ async def top_switch(callback: CallbackQuery) -> None:
     _, category, period = callback.data.split(":", 2)
     text = format_top_text(category, period)
     await callback.message.edit_text(text, reply_markup=top_keyboard(category, period))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "menu:support")
+async def support_section(callback: CallbackQuery) -> None:
+    remember_user(callback.from_user)
+    await callback.message.edit_text(SUPPORT_TEXT, reply_markup=support_inline_keyboard())
     await callback.answer()
 
 
