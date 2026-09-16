@@ -115,7 +115,8 @@ async def show_menu(message: Message) -> None:
         "<b>Lucky Dice</b> — испытай удачу!\n\n"
         "<i>Здесь заводят игры, зарабатывают на партнёрке "
         "и следят за своим прогрессом.</i>\n\n"
-        "Выберите раздел:"
+        '<tg-emoji emoji-id="5886676966102274844">👆</tg-emoji> '
+        "Выберите раздел ниже:"
     )
     await message.answer(text, reply_markup=menu_inline_keyboard())
 
