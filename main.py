@@ -110,7 +110,14 @@ async def cmd_start(message: Message) -> None:
 
 @router.message(F.text == "Меню")
 async def show_menu(message: Message) -> None:
-    await message.answer("Выберите раздел:", reply_markup=menu_inline_keyboard())
+    text = (
+        '<tg-emoji emoji-id="5260547274957672345">🎲</tg-emoji> '
+        "<b>Lucky Dice</b> — испытай удачу!\n\n"
+        "<i>Здесь заводят игры, зарабатывают на партнёрке "
+        "и следят за своим прогрессом.</i>\n\n"
+        "Выберите раздел:"
+    )
+    await message.answer(text, reply_markup=menu_inline_keyboard())
 
 
 @router.message(F.text == "Игры")
