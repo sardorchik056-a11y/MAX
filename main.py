@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
@@ -43,6 +44,37 @@ def get_profile_stats(user_id: int) -> dict[str, float]:
             "turnover": 0.0,
         }
     return USER_PROFILES[user_id]
+
+
+# --------------------------------------------------------------------------
+# Хранилище транзакций (временное, in-memory) — для статистики по периодам
+# --------------------------------------------------------------------------
+# NOTE: как и USER_PROFILES, это заглушка. Когда появится БД, депозиты и
+# выводы нужно будет логировать сюда (или сразу в БД с полем timestamp),
+# чтобы get_period_stats считал реальные суммы за день/неделю/месяц.
+
+USER_TRANSACTIONS: dict[int, list[dict]] = {}
+
+PERIOD_DAYS = {"day": 1, "week": 7, "month": 30}
+PERIOD_LABELS = {"day": "День", "week": "Неделя", "month": "Месяц"}
+
+
+def get_period_stats(user_id: int, period: str) -> dict[str, float]:
+    """Суммирует депозиты/выводы/оборот пользователя за период."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=PERIOD_DAYS.get(period, 1))
+    stats = {"deposits": 0.0, "withdrawals": 0.0, "turnover": 0.0}
+
+    for tx in USER_TRANSACTIONS.get(user_id, []):
+        if tx["timestamp"] < cutoff:
+            continue
+        amount = tx["amount"]
+        stats["turnover"] += amount
+        if tx["type"] == "deposit":
+            stats["deposits"] += amount
+        elif tx["type"] == "withdraw":
+            stats["withdrawals"] += amount
+
+    return stats
 
 # --------------------------------------------------------------------------
 # Форматирование
@@ -140,6 +172,49 @@ def profile_inline_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
+                    text="Пополнить",
+                    callback_data="profile:deposit",
+                    icon_custom_emoji_id="5879814368572478751",
+                ),
+                InlineKeyboardButton(
+                    text="Вывести",
+                    callback_data="profile:withdraw",
+                    icon_custom_emoji_id="5890848474563352982",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Назад",
+                    callback_data="menu:back",
+                    icon_custom_emoji_id="6039539366177541657",
+                ),
+            ],
+        ]
+    )
+
+
+def stats_period_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="День",
+                    callback_data="stats:day",
+                    icon_custom_emoji_id="5890937706803894250",
+                ),
+                InlineKeyboardButton(
+                    text="Неделя",
+                    callback_data="stats:week",
+                    icon_custom_emoji_id="5890937706803894250",
+                ),
+                InlineKeyboardButton(
+                    text="Месяц",
+                    callback_data="stats:month",
+                    icon_custom_emoji_id="5890937706803894250",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
                     text="Назад",
                     callback_data="menu:back",
                     icon_custom_emoji_id="6039539366177541657",
@@ -190,6 +265,28 @@ def format_profile_text(user_id: int, full_name: str, username: str | None) -> s
     )
 
 
+def format_stats_text(user_id: int, period: str) -> str:
+    stats = get_period_stats(user_id, period)
+    label = PERIOD_LABELS.get(period, "День")
+
+    stats_block = tree_block(
+        [
+            '<tg-emoji emoji-id="5902206159095339799">🤑</tg-emoji> '
+            f"<b>Депозиты:</b> ${stats['deposits']:.2f}",
+            '<tg-emoji emoji-id="5890848474563352982">🪙</tg-emoji> '
+            f"<b>Выводы:</b> ${stats['withdrawals']:.2f}",
+            '<tg-emoji emoji-id="5778421276024509124">💰</tg-emoji> '
+            f"<b>Оборот:</b> ${stats['turnover']:.2f}",
+        ]
+    )
+
+    return (
+        '<tg-emoji emoji-id="5890937706803894250">📅</tg-emoji> '
+        f"<b>Статистика — {label}</b>\n\n"
+        f"{stats_block}"
+    )
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     await message.answer(
@@ -228,6 +325,31 @@ async def profile_section(callback: CallbackQuery) -> None:
     text = format_profile_text(user.id, user.full_name, user.username)
 
     await callback.message.edit_text(text, reply_markup=profile_inline_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "profile:deposit")
+async def profile_deposit(callback: CallbackQuery) -> None:
+    await callback.answer(IN_DEV_TEXT, show_alert=True)
+
+
+@router.callback_query(F.data == "profile:withdraw")
+async def profile_withdraw(callback: CallbackQuery) -> None:
+    await callback.answer(IN_DEV_TEXT, show_alert=True)
+
+
+@router.callback_query(F.data == "menu:stats")
+async def stats_section(callback: CallbackQuery) -> None:
+    text = format_stats_text(callback.from_user.id, "day")
+    await callback.message.edit_text(text, reply_markup=stats_period_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("stats:"))
+async def stats_period_switch(callback: CallbackQuery) -> None:
+    period = callback.data.split(":", 1)[1]
+    text = format_stats_text(callback.from_user.id, period)
+    await callback.message.edit_text(text, reply_markup=stats_period_keyboard())
     await callback.answer()
 
 
