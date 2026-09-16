@@ -140,14 +140,9 @@ def profile_inline_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🔄 Обновить",
-                    callback_data="menu:profile",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text="⬅️ Назад",
+                    text="Назад",
                     callback_data="menu:back",
+                    icon_custom_emoji_id="6039539366177541657",
                 ),
             ],
         ]
@@ -167,17 +162,24 @@ def format_profile_text(user_id: int, full_name: str, username: str | None) -> s
 
     info_block = tree_block(
         [
-            f"🆔 <b>ID:</b> <code>{user_id}</code>",
-            f"📛 <b>Имя:</b> {full_name}",
-            f"🔗 <b>Юзернейм:</b> {username_line}",
+            '<tg-emoji emoji-id="5890925363067886150">✨</tg-emoji> '
+            f"<b>ID:</b> <code>{user_id}</code>",
+            '<tg-emoji emoji-id="5864019342873598613">🧠</tg-emoji> '
+            f"<b>Имя:</b> {full_name}",
+            '<tg-emoji emoji-id="6039451237743595514">📎</tg-emoji> '
+            f"<b>Юзернейм:</b> {username_line}",
         ]
     )
     stats_block = tree_block(
         [
-            f"💰 <b>Баланс:</b> {stats['balance']:.2f} ₽",
-            f"📥 <b>Всего депозитов:</b> {stats['deposits']:.2f} ₽",
-            f"📤 <b>Всего выводов:</b> {stats['withdrawals']:.2f} ₽",
-            f"📊 <b>Оборот:</b> {stats['turnover']:.2f} ₽",
+            '<tg-emoji emoji-id="5769126056262898415">👛</tg-emoji> '
+            f"<b>Баланс:</b> ${stats['balance']:.2f}",
+            '<tg-emoji emoji-id="5902206159095339799">🤑</tg-emoji> '
+            f"<b>Всего депозитов:</b> ${stats['deposits']:.2f}",
+            '<tg-emoji emoji-id="5890848474563352982">🪙</tg-emoji> '
+            f"<b>Всего выводов:</b> ${stats['withdrawals']:.2f}",
+            '<tg-emoji emoji-id="5778421276024509124">💰</tg-emoji> '
+            f"<b>Оборот:</b> ${stats['turnover']:.2f}",
         ]
     )
 
