@@ -1043,12 +1043,6 @@ async def show_menu(message: Message) -> None:
     await message.answer(text, reply_markup=menu_inline_keyboard())
 
 
-@router.message(F.text == "Игры")
-async def games_section(message: Message) -> None:
-    remember_user(message.from_user)
-    await message.answer(IN_DEV_TEXT)
-
-
 @router.message(F.text == "Партнеры")
 async def partners_section(message: Message) -> None:
     remember_user(message.from_user)
@@ -1192,6 +1186,12 @@ async def edit_panel(
 
     sent = await bot.send_message(fallback_chat_id, text, reply_markup=reply_markup)
     await state.update_data(panel_chat_id=sent.chat.id, panel_message_id=sent.message_id)
+
+
+# Импортируется здесь (а не в начале файла), потому что games.py на этапе
+# своего импорта уже обращается к remember_user/get_profile_stats/log_game_round/
+# edit_panel/_safe_delete — они должны быть определены к этому моменту.
+from games import router as games_router  # noqa: E402
 
 
 # --- Создание чека ---
@@ -1719,6 +1719,7 @@ async def main() -> None:
     )
     dp = Dispatcher()
     dp.include_router(router)
+    dp.include_router(games_router)
 
     global BOT_USERNAME
     me = await bot.get_me()
