@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import random
+import string
 from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, Dispatcher, F, Router
@@ -26,7 +28,7 @@ BOT_TOKEN = "8841055640:AAE65cYHaE9XVEo2fQLwZ5kPxrR1Fncqm5Q"
 
 # ID администраторов бота (Telegram user_id). Узнать свой ID можно, например,
 # у @userinfobot. Добавьте сюда ID всех, кому нужен доступ к админ-панели.
-ADMIN_IDS: set[int] = {8118184388}
+ADMIN_IDS: set[int] = {123456789}
 
 
 def is_admin(user_id: int) -> bool:
@@ -268,6 +270,120 @@ def get_global_stats() -> dict[str, float]:
         "total_win": total_win,
         "casino_profit": total_bet - total_win,
     }
+
+
+# --------------------------------------------------------------------------
+# Хранилище чеков (временное, in-memory)
+# --------------------------------------------------------------------------
+# NOTE: заглушка, как и остальные хранилища. С появлением БД чеки нужно
+# будет хранить там же, с теми же полями.
+
+CHECKS: dict[str, dict] = {}
+
+CHECK_RESTRICTION_LABELS = {
+    "none": "Без ограничений",
+    "turnover_day": "Оборот за день",
+    "turnover_week": "Оборот за неделю",
+    "deposits_total": "Сумма депозитов",
+}
+
+
+def generate_check_code() -> str:
+    """Генерирует уникальный код чека вида LD-XXXXXXXX."""
+    while True:
+        code = "LD-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+        if code not in CHECKS:
+            return code
+
+
+def get_total_deposits(user_id: int) -> float:
+    """Сумма всех депозитов пользователя за всё время."""
+    return sum(
+        tx["amount"] for tx in USER_TRANSACTIONS.get(user_id, []) if tx["type"] == "deposit"
+    )
+
+
+def check_restriction_status(user_id: int, check: dict) -> tuple[bool, str]:
+    """Проверяет, выполняет ли пользователь условие активации чека.
+    Возвращает (выполнено ли условие, текст с требованием и текущим значением)."""
+    restriction_type = check["restriction_type"]
+    value = check["restriction_value"]
+
+    if restriction_type == "none":
+        return True, ""
+
+    if restriction_type == "turnover_day":
+        current = get_period_stats(user_id, "day")["turnover"]
+        label = "оборот за день"
+    elif restriction_type == "turnover_week":
+        current = get_period_stats(user_id, "week")["turnover"]
+        label = "оборот за неделю"
+    else:  # "deposits_total"
+        current = get_total_deposits(user_id)
+        label = "сумма депозитов"
+
+    ok = current >= value
+    description = f"Нужно: {label} от ${value:,.2f}. У вас: ${current:,.2f}"
+    return ok, description
+
+
+def create_check(
+    creator_id: int,
+    amount: float,
+    max_activations: int,
+    restriction_type: str,
+    restriction_value: float,
+) -> dict:
+    """Создаёт новый чек и сохраняет его в хранилище."""
+    check = {
+        "code": generate_check_code(),
+        "creator_id": creator_id,
+        "amount": amount,
+        "max_activations": max_activations,
+        "activations_used": 0,
+        "activated_by": set(),
+        "created_at": datetime.now(timezone.utc),
+        "active": True,
+        "restriction_type": restriction_type,
+        "restriction_value": restriction_value,
+    }
+    CHECKS[check["code"]] = check
+    return check
+
+
+def activate_check(user_id: int, code: str) -> tuple[bool, str, float]:
+    """Пытается активировать чек. Возвращает (успех, сообщение, зачисленная сумма)."""
+    check = CHECKS.get(code.strip().upper())
+    if not check or not check["active"]:
+        return False, "Чек не найден или уже недействителен.", 0.0
+
+    if check["creator_id"] == user_id:
+        return False, "Нельзя активировать собственный чек.", 0.0
+
+    if user_id in check["activated_by"]:
+        return False, "Вы уже активировали этот чек.", 0.0
+
+    if check["activations_used"] >= check["max_activations"]:
+        check["active"] = False
+        return False, "Все активации этого чека уже использованы.", 0.0
+
+    ok, description = check_restriction_status(user_id, check)
+    if not ok:
+        return False, f"Не выполнено условие активации.\n{description}", 0.0
+
+    amount = check["amount"]
+    profile = get_profile_stats(user_id)
+    profile["balance"] += amount
+    USER_TRANSACTIONS.setdefault(user_id, []).append(
+        {"timestamp": datetime.now(timezone.utc), "amount": amount, "type": "check_activation"}
+    )
+
+    check["activations_used"] += 1
+    check["activated_by"].add(user_id)
+    if check["activations_used"] >= check["max_activations"]:
+        check["active"] = False
+
+    return True, "Чек успешно активирован!", amount
 
 
 # --------------------------------------------------------------------------
@@ -542,6 +658,88 @@ def format_global_stats_text() -> str:
 
 
 # --------------------------------------------------------------------------
+# Раздел «Чеки» — клавиатуры и состояния FSM
+# --------------------------------------------------------------------------
+
+
+class CheckStates(StatesGroup):
+    activate_code = State()
+    create_count = State()
+    create_amount = State()
+    create_restriction_value = State()
+
+
+def checks_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🎟 Активировать чек", callback_data="checks:activate"),
+            ],
+            [
+                InlineKeyboardButton(text="➕ Создать чек", callback_data="checks:create"),
+            ],
+            [
+                InlineKeyboardButton(text="📄 Мои чеки", callback_data="checks:mine"),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Назад",
+                    callback_data="menu:back",
+                    icon_custom_emoji_id="6039539366177541657",
+                ),
+            ],
+        ]
+    )
+
+
+def checks_cancel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="checks:cancel")]]
+    )
+
+
+def check_type_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="1️⃣ Одноразовый", callback_data="checks:type:single"),
+                InlineKeyboardButton(text="♾ Многоразовый", callback_data="checks:type:multi"),
+            ],
+            [InlineKeyboardButton(text="Отмена", callback_data="checks:cancel")],
+        ]
+    )
+
+
+def check_restriction_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🚫 Без ограничений", callback_data="checks:restriction:none")],
+            [
+                InlineKeyboardButton(text="📅 Оборот за день", callback_data="checks:restriction:turnover_day"),
+                InlineKeyboardButton(text="🗓 Оборот за неделю", callback_data="checks:restriction:turnover_week"),
+            ],
+            [InlineKeyboardButton(text="💵 Сумма депозитов", callback_data="checks:restriction:deposits_total")],
+            [InlineKeyboardButton(text="Отмена", callback_data="checks:cancel")],
+        ]
+    )
+
+
+def check_created_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="✅ Готово", callback_data="checks:back")]]
+    )
+
+
+def my_checks_keyboard(codes: list[str]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"❌ Деактивировать {code}", callback_data=f"checks:deactivate:{code}")]
+        for code in codes
+    ]
+    rows.append([InlineKeyboardButton(text="Назад", callback_data="checks:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# --------------------------------------------------------------------------
 # Хендлеры
 # --------------------------------------------------------------------------
 
@@ -629,6 +827,79 @@ def format_top_text(category: str, period: str) -> str:
         lines.append(f"{position} <b>{name}</b> — {value_text}")
 
     return f"{header}\n\n" + "\n".join(lines)
+
+
+def format_checks_menu_text() -> str:
+    return (
+        '<tg-emoji emoji-id="6037175527846975726">🎫</tg-emoji> <b>Чеки</b>\n\n'
+        "<i>Создавайте одноразовые и многоразовые чеки, чтобы делиться балансом "
+        "с другими игроками, или активируйте чек, который получили сами.</i>"
+    )
+
+
+def format_check_card(check: dict) -> str:
+    status = "🟢 Активен" if check["active"] else "🔴 Использован / выключен"
+    restriction_label = CHECK_RESTRICTION_LABELS.get(check["restriction_type"], "Без ограничений")
+    restriction_line = (
+        f"{restriction_label} — от ${check['restriction_value']:,.2f}"
+        if check["restriction_type"] != "none"
+        else restriction_label
+    )
+
+    lines = [
+        f"<b>Код:</b> <code>{check['code']}</code>",
+        f"<b>Сумма за активацию:</b> ${check['amount']:,.2f}",
+        f"<b>Активации:</b> {check['activations_used']}/{check['max_activations']}",
+        f"<b>Условие:</b> {restriction_line}",
+        f"<b>Статус:</b> {status}",
+    ]
+    return tree_block(lines)
+
+
+def format_my_checks_text(user_id: int) -> str:
+    my_checks = sorted(
+        (c for c in CHECKS.values() if c["creator_id"] == user_id),
+        key=lambda c: c["created_at"],
+        reverse=True,
+    )
+
+    header = '<tg-emoji emoji-id="6037175527846975726">📄</tg-emoji> <b>Мои чеки</b>'
+    if not my_checks:
+        return f"{header}\n\n└ Вы ещё не создавали чеки."
+
+    blocks = [format_check_card(c) for c in my_checks[:10]]
+    return f"{header}\n\n" + "\n\n".join(blocks)
+
+
+def format_check_created_text(check: dict) -> str:
+    restriction_label = CHECK_RESTRICTION_LABELS.get(check["restriction_type"], "Без ограничений")
+    restriction_line = (
+        f"{restriction_label} — от ${check['restriction_value']:,.2f}"
+        if check["restriction_type"] != "none"
+        else restriction_label
+    )
+    type_label = (
+        "Одноразовый"
+        if check["max_activations"] == 1
+        else f"Многоразовый ({check['max_activations']} активаций)"
+    )
+
+    body = tree_block(
+        [
+            f"<b>Тип:</b> {type_label}",
+            f"<b>Сумма за активацию:</b> ${check['amount']:,.2f}",
+            f"<b>Условие активации:</b> {restriction_line}",
+        ]
+    )
+
+    return (
+        '<tg-emoji emoji-id="6037175527846975726">✅</tg-emoji> <b>Чек создан!</b>\n\n'
+        f"{body}\n\n"
+        "<i>Код чека (нажмите, чтобы скопировать):</i>\n"
+        f"<code>{check['code']}</code>\n\n"
+        "<i>Отправьте его тому, кому хотите передать баланс. Активировать чек можно "
+        "в разделе «Чеки» → «Активировать чек».</i>"
+    )
 
 
 @router.message(CommandStart())
@@ -741,6 +1012,269 @@ async def back_to_menu(callback: CallbackQuery) -> None:
     )
     await callback.message.edit_text(text, reply_markup=menu_inline_keyboard())
     await callback.answer()
+
+
+# --------------------------------------------------------------------------
+# Раздел «Чеки»
+# --------------------------------------------------------------------------
+
+
+@router.callback_query(F.data == "menu:checks")
+async def checks_section(callback: CallbackQuery, state: FSMContext) -> None:
+    remember_user(callback.from_user)
+    await state.clear()
+    await callback.message.edit_text(format_checks_menu_text(), reply_markup=checks_menu_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "checks:back")
+async def checks_back(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await callback.message.edit_text(format_checks_menu_text(), reply_markup=checks_menu_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "checks:cancel")
+async def checks_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await callback.message.edit_text(format_checks_menu_text(), reply_markup=checks_menu_keyboard())
+    await callback.answer("Отменено")
+
+
+# --- Активация чека ---
+
+
+@router.callback_query(F.data == "checks:activate")
+async def checks_activate_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(CheckStates.activate_code)
+    await callback.message.edit_text(
+        '<tg-emoji emoji-id="6037175527846975726">🎟</tg-emoji> <b>Активация чека</b>\n\n'
+        "Введите код чека:",
+        reply_markup=checks_cancel_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.message(CheckStates.activate_code)
+async def checks_activate_code(message: Message, state: FSMContext) -> None:
+    remember_user(message.from_user)
+    await state.clear()
+    code = (message.text or "").strip()
+
+    if not code:
+        await message.answer("Пустой код.", reply_markup=checks_menu_keyboard())
+        return
+
+    ok, msg, amount = activate_check(message.from_user.id, code)
+    if ok:
+        await message.answer(
+            f"✅ {msg}\nНа баланс зачислено: <b>${amount:,.2f}</b>",
+            reply_markup=checks_menu_keyboard(),
+        )
+    else:
+        await message.answer(f"❌ {msg}", reply_markup=checks_menu_keyboard())
+
+
+# --- Создание чека ---
+
+
+@router.callback_query(F.data == "checks:create")
+async def checks_create_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await callback.message.edit_text(
+        '<tg-emoji emoji-id="6037175527846975726">➕</tg-emoji> <b>Создание чека</b>\n\n'
+        "Выберите тип чека:",
+        reply_markup=check_type_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("checks:type:"))
+async def checks_create_type(callback: CallbackQuery, state: FSMContext) -> None:
+    check_type = callback.data.split(":", 2)[2]
+
+    if check_type == "single":
+        await state.update_data(max_activations=1)
+        await state.set_state(CheckStates.create_amount)
+        await callback.message.edit_text(
+            "Введите сумму, которая будет зачисляться за активацию (например, 5):",
+            reply_markup=checks_cancel_keyboard(),
+        )
+    else:
+        await state.set_state(CheckStates.create_count)
+        await callback.message.edit_text(
+            "Введите количество активаций (например, 10):",
+            reply_markup=checks_cancel_keyboard(),
+        )
+    await callback.answer()
+
+
+@router.message(CheckStates.create_count)
+async def checks_create_count(message: Message, state: FSMContext) -> None:
+    raw = (message.text or "").strip()
+    if not raw.isdigit() or int(raw) <= 0:
+        await message.answer("Некорректное число. Введите количество активаций (целое число больше 0):")
+        return
+
+    await state.update_data(max_activations=int(raw))
+    await state.set_state(CheckStates.create_amount)
+    await message.answer(
+        "Введите сумму, которая будет зачисляться за КАЖДУЮ активацию (например, 5):",
+        reply_markup=checks_cancel_keyboard(),
+    )
+
+
+@router.message(CheckStates.create_amount)
+async def checks_create_amount(message: Message, state: FSMContext) -> None:
+    try:
+        amount = float((message.text or "").strip().replace(",", "."))
+        if amount <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("Некорректная сумма. Введите положительное число:")
+        return
+
+    data = await state.get_data()
+    max_activations = data["max_activations"]
+    total_cost = amount * max_activations
+
+    profile = get_profile_stats(message.from_user.id)
+    if profile["balance"] < total_cost:
+        await state.clear()
+        await message.answer(
+            "❌ Недостаточно средств на балансе.\n"
+            f"Нужно: ${total_cost:,.2f}, у вас: ${profile['balance']:,.2f}",
+            reply_markup=checks_menu_keyboard(),
+        )
+        return
+
+    await state.update_data(amount=amount)
+    await message.answer(
+        "Выберите условие активации чека:",
+        reply_markup=check_restriction_keyboard(),
+    )
+
+
+async def _finalize_check_creation(
+    message_obj: Message,
+    user_id: int,
+    state: FSMContext,
+    restriction_type: str,
+    restriction_value: float,
+) -> None:
+    data = await state.get_data()
+    amount = data["amount"]
+    max_activations = data["max_activations"]
+    total_cost = amount * max_activations
+
+    profile = get_profile_stats(user_id)
+    if profile["balance"] < total_cost:
+        await state.clear()
+        await message_obj.answer(
+            "❌ Недостаточно средств на балансе.\n"
+            f"Нужно: ${total_cost:,.2f}, у вас: ${profile['balance']:,.2f}",
+            reply_markup=checks_menu_keyboard(),
+        )
+        return
+
+    profile["balance"] -= total_cost
+    USER_TRANSACTIONS.setdefault(user_id, []).append(
+        {"timestamp": datetime.now(timezone.utc), "amount": total_cost, "type": "check_create"}
+    )
+
+    check = create_check(user_id, amount, max_activations, restriction_type, restriction_value)
+    await state.clear()
+
+    await message_obj.answer(format_check_created_text(check), reply_markup=check_created_keyboard())
+
+
+@router.callback_query(F.data.startswith("checks:restriction:"))
+async def checks_create_restriction(callback: CallbackQuery, state: FSMContext) -> None:
+    restriction_type = callback.data.split(":", 2)[2]
+
+    if restriction_type == "none":
+        await _finalize_check_creation(callback.message, callback.from_user.id, state, restriction_type, 0.0)
+        await callback.answer()
+        return
+
+    await state.update_data(restriction_type=restriction_type)
+    await state.set_state(CheckStates.create_restriction_value)
+    label = CHECK_RESTRICTION_LABELS.get(restriction_type, "")
+    await callback.message.edit_text(
+        f"Введите минимальное значение для условия «{label}» (например, 50):",
+        reply_markup=checks_cancel_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.message(CheckStates.create_restriction_value)
+async def checks_create_restriction_value(message: Message, state: FSMContext) -> None:
+    try:
+        value = float((message.text or "").strip().replace(",", "."))
+        if value <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("Некорректное значение. Введите положительное число:")
+        return
+
+    data = await state.get_data()
+    await _finalize_check_creation(message, message.from_user.id, state, data["restriction_type"], value)
+
+
+# --- Мои чеки ---
+
+
+@router.callback_query(F.data == "checks:mine")
+async def checks_mine(callback: CallbackQuery) -> None:
+    user_id = callback.from_user.id
+    my_codes = sorted(
+        (c["code"] for c in CHECKS.values() if c["creator_id"] == user_id),
+        key=lambda code: CHECKS[code]["created_at"],
+        reverse=True,
+    )[:10]
+
+    await callback.message.edit_text(
+        format_my_checks_text(user_id),
+        reply_markup=my_checks_keyboard(my_codes) if my_codes else checks_menu_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("checks:deactivate:"))
+async def checks_deactivate(callback: CallbackQuery) -> None:
+    code = callback.data.split(":", 2)[2]
+    check = CHECKS.get(code)
+
+    if not check or check["creator_id"] != callback.from_user.id:
+        await callback.answer("Чек не найден.", show_alert=True)
+        return
+
+    if not check["active"]:
+        await callback.answer("Чек уже неактивен.", show_alert=True)
+        return
+
+    remaining = check["max_activations"] - check["activations_used"]
+    refund = remaining * check["amount"]
+    if refund > 0:
+        profile = get_profile_stats(callback.from_user.id)
+        profile["balance"] += refund
+        USER_TRANSACTIONS.setdefault(callback.from_user.id, []).append(
+            {"timestamp": datetime.now(timezone.utc), "amount": refund, "type": "check_refund"}
+        )
+
+    check["active"] = False
+
+    my_codes = sorted(
+        (c["code"] for c in CHECKS.values() if c["creator_id"] == callback.from_user.id),
+        key=lambda c: CHECKS[c]["created_at"],
+        reverse=True,
+    )[:10]
+
+    await callback.message.edit_text(
+        format_my_checks_text(callback.from_user.id),
+        reply_markup=my_checks_keyboard(my_codes) if my_codes else checks_menu_keyboard(),
+    )
+    await callback.answer(f"Чек деактивирован, возвращено ${refund:,.2f}" if refund else "Чек деактивирован")
 
 
 @router.callback_query(F.data.startswith("menu:"))
