@@ -949,14 +949,14 @@ def format_check_card(check: dict) -> str:
 
 def format_my_checks_text(user_id: int) -> str:
     my_checks = sorted(
-        (c for c in CHECKS.values() if c["creator_id"] == user_id),
+        (c for c in CHECKS.values() if c["creator_id"] == user_id and c["active"]),
         key=lambda c: c["created_at"],
         reverse=True,
     )
 
     header = '<tg-emoji emoji-id="6037175527846975726">📄</tg-emoji> <b>Мои чеки</b>'
     if not my_checks:
-        return f"{header}\n\n└ Вы ещё не создавали чеки."
+        return f"{header}\n\n└ У вас нет активных чеков."
 
     blocks = [format_check_card(c) for c in my_checks[:10]]
     return f"{header}\n\n" + "\n\n".join(blocks)
@@ -1383,7 +1383,7 @@ async def checks_create_restriction_value(message: Message, state: FSMContext, b
 async def checks_mine(callback: CallbackQuery) -> None:
     user_id = callback.from_user.id
     my_codes = sorted(
-        (c["code"] for c in CHECKS.values() if c["creator_id"] == user_id),
+        (c["code"] for c in CHECKS.values() if c["creator_id"] == user_id and c["active"]),
         key=lambda code: CHECKS[code]["created_at"],
         reverse=True,
     )[:10]
@@ -1420,7 +1420,7 @@ async def checks_deactivate(callback: CallbackQuery) -> None:
     check["active"] = False
 
     my_codes = sorted(
-        (c["code"] for c in CHECKS.values() if c["creator_id"] == callback.from_user.id),
+        (c["code"] for c in CHECKS.values() if c["creator_id"] == callback.from_user.id and c["active"]),
         key=lambda c: CHECKS[c]["created_at"],
         reverse=True,
     )[:10]
