@@ -28,7 +28,7 @@ BOT_TOKEN = "8841055640:AAE65cYHaE9XVEo2fQLwZ5kPxrR1Fncqm5Q"
 
 # ID администраторов бота (Telegram user_id). Узнать свой ID можно, например,
 # у @userinfobot. Добавьте сюда ID всех, кому нужен доступ к админ-панели.
-ADMIN_IDS: set[int] = {123456789}
+ADMIN_IDS: set[int] = {8118184388}
 
 
 def is_admin(user_id: int) -> bool:
