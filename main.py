@@ -593,15 +593,27 @@ def admin_panel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="💰 Выдать баланс", callback_data="admin:grant"),
-                InlineKeyboardButton(text="➖ Списать баланс", callback_data="admin:deduct"),
+                InlineKeyboardButton(
+                    text="Выдать баланс",
+                    callback_data="admin:grant",
+                    icon_custom_emoji_id="5879814368572478751",  # как «Пополнить» в профиле
+                ),
+                InlineKeyboardButton(
+                    text="Списать баланс",
+                    callback_data="admin:deduct",
+                    icon_custom_emoji_id="5890848474563352982",  # как «Вывести» в профиле
+                ),
             ],
             [
-                InlineKeyboardButton(text="📊 Общая статистика", callback_data="admin:stats"),
-                InlineKeyboardButton(text="🔎 Найти пользователя", callback_data="admin:find"),
+                InlineKeyboardButton(
+                    text="Общая статистика",
+                    callback_data="admin:stats",
+                    icon_custom_emoji_id="5258330865674494479",  # как «Статистика» в меню
+                ),
+                InlineKeyboardButton(text="Найти пользователя", callback_data="admin:find"),
             ],
             [
-                InlineKeyboardButton(text="📢 Рассылка", callback_data="admin:broadcast"),
+                InlineKeyboardButton(text="Рассылка", callback_data="admin:broadcast"),
             ],
             [
                 InlineKeyboardButton(text="Закрыть", callback_data="admin:close"),
@@ -618,7 +630,15 @@ def admin_cancel_keyboard() -> InlineKeyboardMarkup:
 
 def admin_back_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="Назад", callback_data="admin:back")]]
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Назад",
+                    callback_data="admin:back",
+                    icon_custom_emoji_id="6039539366177541657",
+                )
+            ]
+        ]
     )
 
 
@@ -679,14 +699,31 @@ class CheckStates(StatesGroup):
     create_restriction_value = State()
 
 
+# Эмодзи для раздела «Чеки»: часть — свои, часть переиспользована из профиля/меню
+CHECK_CREATE_EMOJI_ID = "5258108352008823107"  # ➕
+CHECK_MINE_EMOJI_ID = "5280962371207077415"  # 💎
+CHECK_NONE_RESTRICTION_EMOJI_ID = "5260342697075416641"  # ❌
+CHECK_TURNOVER_EMOJI_ID = "5778421276024509124"  # 💰 как «Оборот» в профиле
+CHECK_DEPOSITS_EMOJI_ID = "5902206159095339799"  # 🤑 как «Всего депозитов» в профиле
+CHECK_SINGLE_TYPE_EMOJI_ID = TOP_POSITION_EMOJI_IDS[0]  # 1️⃣ — тот же, что в топе
+
+
 def checks_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="➕ Создать чек", callback_data="checks:create"),
+                InlineKeyboardButton(
+                    text="Создать чек",
+                    callback_data="checks:create",
+                    icon_custom_emoji_id=CHECK_CREATE_EMOJI_ID,
+                ),
             ],
             [
-                InlineKeyboardButton(text="📄 Мои чеки", callback_data="checks:mine"),
+                InlineKeyboardButton(
+                    text="Мои чеки",
+                    callback_data="checks:mine",
+                    icon_custom_emoji_id=CHECK_MINE_EMOJI_ID,
+                ),
             ],
             [
                 InlineKeyboardButton(
@@ -709,8 +746,12 @@ def check_type_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="1️⃣ Одноразовый", callback_data="checks:type:single"),
-                InlineKeyboardButton(text="♾ Многоразовый", callback_data="checks:type:multi"),
+                InlineKeyboardButton(
+                    text="Одноразовый",
+                    callback_data="checks:type:single",
+                    icon_custom_emoji_id=CHECK_SINGLE_TYPE_EMOJI_ID,
+                ),
+                InlineKeyboardButton(text="Многоразовый", callback_data="checks:type:multi"),
             ],
             [InlineKeyboardButton(text="Отмена", callback_data="checks:cancel")],
         ]
@@ -720,12 +761,32 @@ def check_type_keyboard() -> InlineKeyboardMarkup:
 def check_restriction_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🚫 Без ограничений", callback_data="checks:restriction:none")],
             [
-                InlineKeyboardButton(text="📅 Оборот за день", callback_data="checks:restriction:turnover_day"),
-                InlineKeyboardButton(text="🗓 Оборот за неделю", callback_data="checks:restriction:turnover_week"),
+                InlineKeyboardButton(
+                    text="Без ограничений",
+                    callback_data="checks:restriction:none",
+                    icon_custom_emoji_id=CHECK_NONE_RESTRICTION_EMOJI_ID,
+                )
             ],
-            [InlineKeyboardButton(text="💵 Сумма депозитов", callback_data="checks:restriction:deposits_total")],
+            [
+                InlineKeyboardButton(
+                    text="Оборот за день",
+                    callback_data="checks:restriction:turnover_day",
+                    icon_custom_emoji_id=CHECK_TURNOVER_EMOJI_ID,
+                ),
+                InlineKeyboardButton(
+                    text="Оборот за неделю",
+                    callback_data="checks:restriction:turnover_week",
+                    icon_custom_emoji_id=CHECK_TURNOVER_EMOJI_ID,
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Сумма депозитов",
+                    callback_data="checks:restriction:deposits_total",
+                    icon_custom_emoji_id=CHECK_DEPOSITS_EMOJI_ID,
+                )
+            ],
             [InlineKeyboardButton(text="Отмена", callback_data="checks:cancel")],
         ]
     )
@@ -733,13 +794,19 @@ def check_restriction_keyboard() -> InlineKeyboardMarkup:
 
 def check_created_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="✅ Готово", callback_data="checks:back")]]
+        inline_keyboard=[[InlineKeyboardButton(text="Готово", callback_data="checks:back")]]
     )
 
 
 def my_checks_keyboard(codes: list[str]) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=f"❌ Деактивировать {code}", callback_data=f"checks:deactivate:{code}")]
+        [
+            InlineKeyboardButton(
+                text=f"Деактивировать {code}",
+                callback_data=f"checks:deactivate:{code}",
+                icon_custom_emoji_id=CHECK_NONE_RESTRICTION_EMOJI_ID,
+            )
+        ]
         for code in codes
     ]
     rows.append([InlineKeyboardButton(text="Назад", callback_data="checks:back")])
