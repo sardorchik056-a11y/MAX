@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
@@ -33,6 +33,17 @@ ADMIN_IDS: set[int] = {8118184388}
 
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
+
+
+# Юзернейм бота, определяется автоматически при запуске (см. main()) — нужен
+# для формирования ссылок активации чеков вида t.me/<bot>?start=check_<code>
+BOT_USERNAME: str | None = None
+
+
+def get_check_link(code: str) -> str:
+    if BOT_USERNAME:
+        return f"https://t.me/{BOT_USERNAME}?start=check_{code}"
+    return f"t.me/<bot>?start=check_{code}"
 
 
 IN_DEV_TEXT = "🚧 Этот раздел находится в разработке.\nСкоро здесь появится функционал!"
@@ -663,7 +674,6 @@ def format_global_stats_text() -> str:
 
 
 class CheckStates(StatesGroup):
-    activate_code = State()
     create_count = State()
     create_amount = State()
     create_restriction_value = State()
@@ -672,9 +682,6 @@ class CheckStates(StatesGroup):
 def checks_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🎟 Активировать чек", callback_data="checks:activate"),
-            ],
             [
                 InlineKeyboardButton(text="➕ Создать чек", callback_data="checks:create"),
             ],
@@ -833,7 +840,7 @@ def format_checks_menu_text() -> str:
     return (
         '<tg-emoji emoji-id="6037175527846975726">🎫</tg-emoji> <b>Чеки</b>\n\n'
         "<i>Создавайте одноразовые и многоразовые чеки, чтобы делиться балансом "
-        "с другими игроками, или активируйте чек, который получили сами.</i>"
+        "с другими игроками — активация происходит по ссылке, в один тап.</i>"
     )
 
 
@@ -853,7 +860,12 @@ def format_check_card(check: dict) -> str:
         f"<b>Условие:</b> {restriction_line}",
         f"<b>Статус:</b> {status}",
     ]
-    return tree_block(lines)
+    card = tree_block(lines)
+
+    if check["active"]:
+        card += f"\n🔗 {get_check_link(check['code'])}"
+
+    return card
 
 
 def format_my_checks_text(user_id: int) -> str:
@@ -895,16 +907,42 @@ def format_check_created_text(check: dict) -> str:
     return (
         '<tg-emoji emoji-id="6037175527846975726">✅</tg-emoji> <b>Чек создан!</b>\n\n'
         f"{body}\n\n"
-        "<i>Код чека (нажмите, чтобы скопировать):</i>\n"
-        f"<code>{check['code']}</code>\n\n"
-        "<i>Отправьте его тому, кому хотите передать баланс. Активировать чек можно "
-        "в разделе «Чеки» → «Активировать чек».</i>"
+        "<i>Ссылка активации — перешлите её тому, кому хотите передать баланс. "
+        "Достаточно перейти по ней и нажать «Старт»:</i>\n"
+        f"{get_check_link(check['code'])}\n\n"
+        f"<i>Код чека:</i> <code>{check['code']}</code>"
+    )
+
+
+@router.message(CommandStart(deep_link=True))
+async def cmd_start_deep_link(message: Message, command: CommandObject, state: FSMContext) -> None:
+    remember_user(message.from_user)
+    await state.clear()
+
+    payload = command.args or ""
+    result_line = ""
+    if payload.startswith("check_"):
+        code = payload[len("check_") :]
+        ok, msg, amount = activate_check(message.from_user.id, code)
+        if ok:
+            result_line = (
+                '<tg-emoji emoji-id="6037175527846975726">✅</tg-emoji> '
+                f"{msg}\nНа баланс зачислено: <b>${amount:,.2f}</b>\n\n"
+            )
+        else:
+            result_line = f"❌ {msg}\n\n"
+
+    await message.answer(
+        f"{result_line}Привет, {message.from_user.full_name}! 👋\n\n"
+        "Выберите раздел из меню ниже.",
+        reply_markup=main_reply_keyboard(),
     )
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message) -> None:
+async def cmd_start(message: Message, state: FSMContext) -> None:
     remember_user(message.from_user)
+    await state.clear()
     await message.answer(
         f"Привет, {message.from_user.full_name}! 👋\n\n"
         "Выберите раздел из меню ниже.",
@@ -1041,38 +1079,40 @@ async def checks_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer("Отменено")
 
 
-# --- Активация чека ---
+# --- Вспомогательное: редактирование "панели" вместо новых сообщений ---
 
 
-@router.callback_query(F.data == "checks:activate")
-async def checks_activate_start(callback: CallbackQuery, state: FSMContext) -> None:
-    await state.set_state(CheckStates.activate_code)
-    await callback.message.edit_text(
-        '<tg-emoji emoji-id="6037175527846975726">🎟</tg-emoji> <b>Активация чека</b>\n\n'
-        "Введите код чека:",
-        reply_markup=checks_cancel_keyboard(),
-    )
-    await callback.answer()
+async def _safe_delete(message: Message) -> None:
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
 
-@router.message(CheckStates.activate_code)
-async def checks_activate_code(message: Message, state: FSMContext) -> None:
-    remember_user(message.from_user)
-    await state.clear()
-    code = (message.text or "").strip()
+async def edit_panel(
+    bot: Bot,
+    state: FSMContext,
+    fallback_chat_id: int,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> None:
+    """Редактирует исходное сообщение-панель вместо отправки нового сообщения.
+    Если панель по какой-то причине недоступна — отправляет новое и запоминает его."""
+    data = await state.get_data()
+    panel_chat_id = data.get("panel_chat_id", fallback_chat_id)
+    panel_message_id = data.get("panel_message_id")
 
-    if not code:
-        await message.answer("Пустой код.", reply_markup=checks_menu_keyboard())
-        return
+    if panel_message_id:
+        try:
+            await bot.edit_message_text(
+                text, chat_id=panel_chat_id, message_id=panel_message_id, reply_markup=reply_markup
+            )
+            return
+        except Exception:
+            pass
 
-    ok, msg, amount = activate_check(message.from_user.id, code)
-    if ok:
-        await message.answer(
-            f"✅ {msg}\nНа баланс зачислено: <b>${amount:,.2f}</b>",
-            reply_markup=checks_menu_keyboard(),
-        )
-    else:
-        await message.answer(f"❌ {msg}", reply_markup=checks_menu_keyboard())
+    sent = await bot.send_message(fallback_chat_id, text, reply_markup=reply_markup)
+    await state.update_data(panel_chat_id=sent.chat.id, panel_message_id=sent.message_id)
 
 
 # --- Создание чека ---
@@ -1081,6 +1121,10 @@ async def checks_activate_code(message: Message, state: FSMContext) -> None:
 @router.callback_query(F.data == "checks:create")
 async def checks_create_start(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
+    await state.update_data(
+        panel_chat_id=callback.message.chat.id,
+        panel_message_id=callback.message.message_id,
+    )
     await callback.message.edit_text(
         '<tg-emoji emoji-id="6037175527846975726">➕</tg-emoji> <b>Создание чека</b>\n\n'
         "Выберите тип чека:",
@@ -1110,28 +1154,40 @@ async def checks_create_type(callback: CallbackQuery, state: FSMContext) -> None
 
 
 @router.message(CheckStates.create_count)
-async def checks_create_count(message: Message, state: FSMContext) -> None:
+async def checks_create_count(message: Message, state: FSMContext, bot: Bot) -> None:
     raw = (message.text or "").strip()
     if not raw.isdigit() or int(raw) <= 0:
-        await message.answer("Некорректное число. Введите количество активаций (целое число больше 0):")
+        await edit_panel(
+            bot, state, message.chat.id,
+            "Некорректное число. Введите количество активаций (целое число больше 0):",
+            checks_cancel_keyboard(),
+        )
+        await _safe_delete(message)
         return
 
     await state.update_data(max_activations=int(raw))
     await state.set_state(CheckStates.create_amount)
-    await message.answer(
+    await edit_panel(
+        bot, state, message.chat.id,
         "Введите сумму, которая будет зачисляться за КАЖДУЮ активацию (например, 5):",
-        reply_markup=checks_cancel_keyboard(),
+        checks_cancel_keyboard(),
     )
+    await _safe_delete(message)
 
 
 @router.message(CheckStates.create_amount)
-async def checks_create_amount(message: Message, state: FSMContext) -> None:
+async def checks_create_amount(message: Message, state: FSMContext, bot: Bot) -> None:
     try:
         amount = float((message.text or "").strip().replace(",", "."))
         if amount <= 0:
             raise ValueError
     except ValueError:
-        await message.answer("Некорректная сумма. Введите положительное число:")
+        await edit_panel(
+            bot, state, message.chat.id,
+            "Некорректная сумма. Введите положительное число:",
+            checks_cancel_keyboard(),
+        )
+        await _safe_delete(message)
         return
 
     data = await state.get_data()
@@ -1140,25 +1196,30 @@ async def checks_create_amount(message: Message, state: FSMContext) -> None:
 
     profile = get_profile_stats(message.from_user.id)
     if profile["balance"] < total_cost:
-        await state.clear()
-        await message.answer(
+        await edit_panel(
+            bot, state, message.chat.id,
             "❌ Недостаточно средств на балансе.\n"
             f"Нужно: ${total_cost:,.2f}, у вас: ${profile['balance']:,.2f}",
-            reply_markup=checks_menu_keyboard(),
+            checks_menu_keyboard(),
         )
+        await state.clear()
+        await _safe_delete(message)
         return
 
     await state.update_data(amount=amount)
-    await message.answer(
+    await edit_panel(
+        bot, state, message.chat.id,
         "Выберите условие активации чека:",
-        reply_markup=check_restriction_keyboard(),
+        check_restriction_keyboard(),
     )
+    await _safe_delete(message)
 
 
 async def _finalize_check_creation(
-    message_obj: Message,
-    user_id: int,
+    bot: Bot,
     state: FSMContext,
+    user_id: int,
+    fallback_chat_id: int,
     restriction_type: str,
     restriction_value: float,
 ) -> None:
@@ -1170,10 +1231,11 @@ async def _finalize_check_creation(
     profile = get_profile_stats(user_id)
     if profile["balance"] < total_cost:
         await state.clear()
-        await message_obj.answer(
+        await edit_panel(
+            bot, state, fallback_chat_id,
             "❌ Недостаточно средств на балансе.\n"
             f"Нужно: ${total_cost:,.2f}, у вас: ${profile['balance']:,.2f}",
-            reply_markup=checks_menu_keyboard(),
+            checks_menu_keyboard(),
         )
         return
 
@@ -1185,7 +1247,11 @@ async def _finalize_check_creation(
     check = create_check(user_id, amount, max_activations, restriction_type, restriction_value)
     await state.clear()
 
-    await message_obj.answer(format_check_created_text(check), reply_markup=check_created_keyboard())
+    await edit_panel(
+        bot, state, fallback_chat_id,
+        format_check_created_text(check),
+        check_created_keyboard(),
+    )
 
 
 @router.callback_query(F.data.startswith("checks:restriction:"))
@@ -1193,7 +1259,9 @@ async def checks_create_restriction(callback: CallbackQuery, state: FSMContext) 
     restriction_type = callback.data.split(":", 2)[2]
 
     if restriction_type == "none":
-        await _finalize_check_creation(callback.message, callback.from_user.id, state, restriction_type, 0.0)
+        await _finalize_check_creation(
+            callback.bot, state, callback.from_user.id, callback.message.chat.id, restriction_type, 0.0
+        )
         await callback.answer()
         return
 
@@ -1208,17 +1276,25 @@ async def checks_create_restriction(callback: CallbackQuery, state: FSMContext) 
 
 
 @router.message(CheckStates.create_restriction_value)
-async def checks_create_restriction_value(message: Message, state: FSMContext) -> None:
+async def checks_create_restriction_value(message: Message, state: FSMContext, bot: Bot) -> None:
     try:
         value = float((message.text or "").strip().replace(",", "."))
         if value <= 0:
             raise ValueError
     except ValueError:
-        await message.answer("Некорректное значение. Введите положительное число:")
+        await edit_panel(
+            bot, state, message.chat.id,
+            "Некорректное значение. Введите положительное число:",
+            checks_cancel_keyboard(),
+        )
+        await _safe_delete(message)
         return
 
     data = await state.get_data()
-    await _finalize_check_creation(message, message.from_user.id, state, data["restriction_type"], value)
+    await _finalize_check_creation(
+        bot, state, message.from_user.id, message.chat.id, data["restriction_type"], value
+    )
+    await _safe_delete(message)
 
 
 # --- Мои чеки ---
@@ -1561,6 +1637,10 @@ async def main() -> None:
     )
     dp = Dispatcher()
     dp.include_router(router)
+
+    global BOT_USERNAME
+    me = await bot.get_me()
+    BOT_USERNAME = me.username
 
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
