@@ -89,6 +89,30 @@ GAME_STUB_LABELS = {
 DICE_ICON_EMOJI_ID = "5260547274957672345"  # 🎲, тот же, что в шапке "Lucky Dice"
 BACK_ICON_EMOJI_ID = "6039539366177541657"  # тот же "Назад", что в других разделах
 
+# Самый высокий множитель по игре «Кости» — показывается в главном меню игр
+# (сейчас это "Угадать оба числа" x36 для 2 костей).
+DICE_MAX_MULTIPLIER = max(MULTIPLIERS.values())
+
+# --------------------------------------------------------------------------
+# Общий реестр игр — используется и в главном меню («эмодзи + до Nх»),
+# и в верхнем ряду вкладок-переключателей на экранах уже выбранной игры
+# (по аналогии с переключателем периода в статистике).
+# --------------------------------------------------------------------------
+
+GAMES_INFO: list[dict] = [
+    {
+        "id": "dice",
+        "emoji": "🎲",
+        "callback": "games:dice:menu",
+        "max_multiplier": DICE_MAX_MULTIPLIER,
+    },
+    {"id": "football", "emoji": "⚽", "callback": "games:soon:football", "max_multiplier": None},
+    {"id": "basketball", "emoji": "🏀", "callback": "games:soon:basketball", "max_multiplier": None},
+    {"id": "darts", "emoji": "🎯", "callback": "games:soon:darts", "max_multiplier": None},
+    {"id": "bowling", "emoji": "🎳", "callback": "games:soon:bowling", "max_multiplier": None},
+    {"id": "slot", "emoji": "🎰", "callback": "games:soon:slot", "max_multiplier": None},
+]
+
 
 # --------------------------------------------------------------------------
 # Проверка выигрышных условий
@@ -145,39 +169,45 @@ class GameStates(StatesGroup):
 # --------------------------------------------------------------------------
 
 
+def _game_menu_label(game: dict) -> str:
+    """Формат кнопки в главном меню игр: эмодзи + множитель (без названия)."""
+    mult = game["max_multiplier"]
+    suffix = f"(до {mult:g}x)" if mult is not None else "(скоро)"
+    return f"{game['emoji']}{suffix}"
+
+
 def games_menu_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="Кости",
-                    callback_data="games:dice:menu",
-                    icon_custom_emoji_id=DICE_ICON_EMOJI_ID,
-                ),
-                InlineKeyboardButton(text="Футбол", callback_data="games:soon:football"),
-            ],
-            [
-                InlineKeyboardButton(text="Баскетбол", callback_data="games:soon:basketball"),
-                InlineKeyboardButton(text="Дартс", callback_data="games:soon:darts"),
-            ],
-            [
-                InlineKeyboardButton(text="Боулинг", callback_data="games:soon:bowling"),
-                InlineKeyboardButton(text="Слот", callback_data="games:soon:slot"),
-            ],
-            [
-                InlineKeyboardButton(
-                    text="Назад",
-                    callback_data="menu:back",
-                    icon_custom_emoji_id=BACK_ICON_EMOJI_ID,
-                ),
-            ],
+    game_buttons = [
+        InlineKeyboardButton(text=_game_menu_label(g), callback_data=g["callback"])
+        for g in GAMES_INFO
+    ]
+    # По 2 кнопки в ряд, как раньше.
+    rows = [game_buttons[i : i + 2] for i in range(0, len(game_buttons), 2)]
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="Назад",
+                callback_data="menu:back",
+                icon_custom_emoji_id=BACK_ICON_EMOJI_ID,
+            ),
         ]
     )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def games_tabs_row() -> list[InlineKeyboardButton]:
+    """Верхний ряд вкладок-переключателей между играми — только эмодзи,
+    без названий (по аналогии с переключателем периода в статистике)."""
+    return [
+        InlineKeyboardButton(text=g["emoji"], callback_data=g["callback"])
+        for g in GAMES_INFO
+    ]
 
 
 def dice_mode_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            games_tabs_row(),
             [
                 InlineKeyboardButton(text="1 кость", callback_data="games:dice:mode:1"),
                 InlineKeyboardButton(text="2 кости", callback_data="games:dice:mode:2"),
@@ -196,6 +226,7 @@ def dice_mode_keyboard() -> InlineKeyboardMarkup:
 def dice_bet_keyboard_1() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            games_tabs_row(),
             [
                 InlineKeyboardButton(text="Чёт (x2)", callback_data="games:dice:bet:1:even"),
                 InlineKeyboardButton(text="Нечёт (x2)", callback_data="games:dice:bet:1:odd"),
@@ -228,6 +259,7 @@ def dice_bet_keyboard_1() -> InlineKeyboardMarkup:
 def dice_bet_keyboard_2() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            games_tabs_row(),
             [
                 InlineKeyboardButton(text="Чёт (x4)", callback_data="games:dice:bet:2:even"),
                 InlineKeyboardButton(text="Нечёт (x4)", callback_data="games:dice:bet:2:odd"),
@@ -261,6 +293,7 @@ def dice_pair_pick_keyboard(step: int) -> InlineKeyboardMarkup:
     back_target = "games:dice:mode:2" if step == 1 else "games:dice:bet:2:pair"
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            games_tabs_row(),
             [InlineKeyboardButton(text=str(n), callback_data=f"{prefix}{n}") for n in (1, 2, 3)],
             [InlineKeyboardButton(text=str(n), callback_data=f"{prefix}{n}") for n in (4, 5, 6)],
             [
