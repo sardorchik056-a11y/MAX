@@ -5,7 +5,9 @@ from datetime import datetime, timedelta, timezone
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -21,6 +23,15 @@ from aiogram.types import (
 
 # Вставьте сюда токен вашего бота, полученный у @BotFather
 BOT_TOKEN = "8841055640:AAE65cYHaE9XVEo2fQLwZ5kPxrR1Fncqm5Q"
+
+# ID администраторов бота (Telegram user_id). Узнать свой ID можно, например,
+# у @userinfobot. Добавьте сюда ID всех, кому нужен доступ к админ-панели.
+ADMIN_IDS: set[int] = {8118184388}
+
+
+def is_admin(user_id: int) -> bool:
+    return user_id in ADMIN_IDS
+
 
 IN_DEV_TEXT = "🚧 Этот раздел находится в разработке.\nСкоро здесь появится функционал!"
 
@@ -75,6 +86,8 @@ def get_period_stats(user_id: int, period: str) -> dict[str, float]:
     for tx in USER_TRANSACTIONS.get(user_id, []):
         if tx["timestamp"] < cutoff:
             continue
+        if tx["type"] not in ("deposit", "withdraw"):
+            continue
         amount = tx["amount"]
         stats["turnover"] += amount
         if tx["type"] == "deposit":
@@ -83,6 +96,23 @@ def get_period_stats(user_id: int, period: str) -> dict[str, float]:
             stats["withdrawals"] += amount
 
     return stats
+
+
+def adjust_balance(user_id: int, amount: float, tx_type: str) -> float:
+    """Начисляет ('admin_grant') или списывает ('admin_deduct') баланс пользователю
+    (админское действие) и логирует операцию отдельным типом транзакции, чтобы она
+    не искажала личную статистику пользователя по депозитам/выводам."""
+    stats = get_profile_stats(user_id)
+    stats["balance"] += amount if tx_type == "admin_grant" else -amount
+
+    USER_TRANSACTIONS.setdefault(user_id, []).append(
+        {
+            "timestamp": datetime.now(timezone.utc),
+            "amount": amount,
+            "type": tx_type,
+        }
+    )
+    return stats["balance"]
 
 
 # --------------------------------------------------------------------------
@@ -203,6 +233,41 @@ def get_top_players(category: str, period: str, limit: int = 10) -> list[tuple[i
         aggregated[user_id] = value
 
     return sorted(aggregated.items(), key=lambda item: item[1], reverse=True)[:limit]
+
+
+def get_global_stats() -> dict[str, float]:
+    """Считает общую статистику по всем пользователям — для админ-панели."""
+    total_users = len(USER_INFO) or len(USER_PROFILES)
+    total_balance = sum(profile["balance"] for profile in USER_PROFILES.values())
+
+    total_deposits = 0.0
+    total_withdrawals = 0.0
+    for txs in USER_TRANSACTIONS.values():
+        for tx in txs:
+            if tx["type"] == "deposit":
+                total_deposits += tx["amount"]
+            elif tx["type"] == "withdraw":
+                total_withdrawals += tx["amount"]
+
+    total_games = 0
+    total_bet = 0.0
+    total_win = 0.0
+    for rounds in USER_GAME_ROUNDS.values():
+        for round_ in rounds:
+            total_games += 1
+            total_bet += round_["bet"]
+            total_win += round_["win"]
+
+    return {
+        "total_users": total_users,
+        "total_balance": total_balance,
+        "total_deposits": total_deposits,
+        "total_withdrawals": total_withdrawals,
+        "total_games": total_games,
+        "total_bet": total_bet,
+        "total_win": total_win,
+        "casino_profit": total_bet - total_win,
+    }
 
 
 # --------------------------------------------------------------------------
@@ -394,6 +459,85 @@ def support_inline_keyboard() -> InlineKeyboardMarkup:
                 ),
             ],
         ]
+    )
+
+
+def admin_panel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="💰 Выдать баланс", callback_data="admin:grant"),
+                InlineKeyboardButton(text="➖ Списать баланс", callback_data="admin:deduct"),
+            ],
+            [
+                InlineKeyboardButton(text="📊 Общая статистика", callback_data="admin:stats"),
+                InlineKeyboardButton(text="🔎 Найти пользователя", callback_data="admin:find"),
+            ],
+            [
+                InlineKeyboardButton(text="📢 Рассылка", callback_data="admin:broadcast"),
+            ],
+            [
+                InlineKeyboardButton(text="Закрыть", callback_data="admin:close"),
+            ],
+        ]
+    )
+
+
+def admin_cancel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="admin:cancel")]]
+    )
+
+
+def admin_back_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Назад", callback_data="admin:back")]]
+    )
+
+
+# --------------------------------------------------------------------------
+# Админ-панель — форматирование и состояния FSM
+# --------------------------------------------------------------------------
+
+
+class AdminStates(StatesGroup):
+    grant_user_id = State()
+    grant_amount = State()
+    deduct_user_id = State()
+    deduct_amount = State()
+    find_user_id = State()
+    broadcast_text = State()
+
+
+def format_global_stats_text() -> str:
+    stats = get_global_stats()
+
+    users_block = tree_block(
+        [
+            f"<b>Пользователей:</b> {stats['total_users']}",
+            f"<b>Суммарный баланс:</b> ${stats['total_balance']:,.2f}",
+        ]
+    )
+    money_block = tree_block(
+        [
+            f"<b>Депозиты (всего):</b> ${stats['total_deposits']:,.2f}",
+            f"<b>Выводы (всего):</b> ${stats['total_withdrawals']:,.2f}",
+        ]
+    )
+    games_block = tree_block(
+        [
+            f"<b>Игр сыграно:</b> {stats['total_games']}",
+            f"<b>Оборот по играм:</b> ${stats['total_bet']:,.2f}",
+            f"<b>Выплачено выигрышей:</b> ${stats['total_win']:,.2f}",
+            f"<b>Прибыль казино:</b> ${stats['casino_profit']:,.2f}",
+        ]
+    )
+
+    return (
+        "⚙️ <b>Общая статистика</b>\n\n"
+        f"{users_block}\n\n"
+        f"{money_block}\n\n"
+        f"{games_block}"
     )
 
 
@@ -602,6 +746,271 @@ async def back_to_menu(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("menu:"))
 async def menu_callback(callback: CallbackQuery) -> None:
     await callback.answer("В разработке 🚧", show_alert=True)
+
+
+# --------------------------------------------------------------------------
+# Админ-панель
+# --------------------------------------------------------------------------
+
+
+@router.message(Command("admin"))
+async def admin_entry(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    remember_user(message.from_user)
+
+    if not is_admin(message.from_user.id):
+        await message.answer("🚫 Доступ запрещён.")
+        return
+
+    await message.answer(
+        "⚙️ <b>Админ-панель</b>\n\nВыберите действие:",
+        reply_markup=admin_panel_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "admin:close")
+async def admin_close(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("🚫 Доступ запрещён.", show_alert=True)
+        return
+    await state.clear()
+    await callback.message.delete()
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin:back")
+async def admin_back(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("🚫 Доступ запрещён.", show_alert=True)
+        return
+    await state.clear()
+    await callback.message.edit_text(
+        "⚙️ <b>Админ-панель</b>\n\nВыберите действие:",
+        reply_markup=admin_panel_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin:cancel")
+async def admin_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("🚫 Доступ запрещён.", show_alert=True)
+        return
+    await state.clear()
+    await callback.message.edit_text(
+        "⚙️ <b>Админ-панель</b>\n\nВыберите действие:",
+        reply_markup=admin_panel_keyboard(),
+    )
+    await callback.answer("Отменено")
+
+
+@router.callback_query(F.data == "admin:stats")
+async def admin_stats(callback: CallbackQuery) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("🚫 Доступ запрещён.", show_alert=True)
+        return
+    await callback.message.edit_text(format_global_stats_text(), reply_markup=admin_back_keyboard())
+    await callback.answer()
+
+
+# --- Выдача баланса ---
+
+
+@router.callback_query(F.data == "admin:grant")
+async def admin_grant_start(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("🚫 Доступ запрещён.", show_alert=True)
+        return
+    await state.set_state(AdminStates.grant_user_id)
+    await callback.message.edit_text(
+        "💰 <b>Выдача баланса</b>\n\nВведите ID пользователя, которому начислить баланс:",
+        reply_markup=admin_cancel_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.grant_user_id)
+async def admin_grant_user_id(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    if not raw.lstrip("-").isdigit():
+        await message.answer("Некорректный ID. Введите числовой ID пользователя:")
+        return
+
+    await state.update_data(target_user_id=int(raw))
+    await state.set_state(AdminStates.grant_amount)
+    await message.answer(
+        "Введите сумму для начисления (например, 25.5):",
+        reply_markup=admin_cancel_keyboard(),
+    )
+
+
+@router.message(AdminStates.grant_amount)
+async def admin_grant_amount(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    try:
+        amount = float((message.text or "").strip().replace(",", "."))
+        if amount <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("Некорректная сумма. Введите положительное число:")
+        return
+
+    data = await state.get_data()
+    target_user_id = data["target_user_id"]
+    new_balance = adjust_balance(target_user_id, amount, "admin_grant")
+    await state.clear()
+
+    name = get_display_name(target_user_id)
+    await message.answer(
+        f"✅ Начислено ${amount:,.2f} пользователю {name} (ID <code>{target_user_id}</code>).\n"
+        f"Новый баланс: ${new_balance:,.2f}",
+        reply_markup=admin_panel_keyboard(),
+    )
+
+
+# --- Списание баланса ---
+
+
+@router.callback_query(F.data == "admin:deduct")
+async def admin_deduct_start(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("🚫 Доступ запрещён.", show_alert=True)
+        return
+    await state.set_state(AdminStates.deduct_user_id)
+    await callback.message.edit_text(
+        "➖ <b>Списание баланса</b>\n\nВведите ID пользователя, у которого списать баланс:",
+        reply_markup=admin_cancel_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.deduct_user_id)
+async def admin_deduct_user_id(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    if not raw.lstrip("-").isdigit():
+        await message.answer("Некорректный ID. Введите числовой ID пользователя:")
+        return
+
+    await state.update_data(target_user_id=int(raw))
+    await state.set_state(AdminStates.deduct_amount)
+    await message.answer(
+        "Введите сумму для списания (например, 10):",
+        reply_markup=admin_cancel_keyboard(),
+    )
+
+
+@router.message(AdminStates.deduct_amount)
+async def admin_deduct_amount(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    try:
+        amount = float((message.text or "").strip().replace(",", "."))
+        if amount <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("Некорректная сумма. Введите положительное число:")
+        return
+
+    data = await state.get_data()
+    target_user_id = data["target_user_id"]
+    new_balance = adjust_balance(target_user_id, amount, "admin_deduct")
+    await state.clear()
+
+    name = get_display_name(target_user_id)
+    await message.answer(
+        f"✅ Списано ${amount:,.2f} у пользователя {name} (ID <code>{target_user_id}</code>).\n"
+        f"Новый баланс: ${new_balance:,.2f}",
+        reply_markup=admin_panel_keyboard(),
+    )
+
+
+# --- Поиск пользователя ---
+
+
+@router.callback_query(F.data == "admin:find")
+async def admin_find_start(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("🚫 Доступ запрещён.", show_alert=True)
+        return
+    await state.set_state(AdminStates.find_user_id)
+    await callback.message.edit_text(
+        "🔎 <b>Поиск пользователя</b>\n\nВведите ID пользователя:",
+        reply_markup=admin_cancel_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.find_user_id)
+async def admin_find_user_id(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    if not raw.lstrip("-").isdigit():
+        await message.answer("Некорректный ID. Введите числовой ID пользователя:")
+        return
+
+    target_user_id = int(raw)
+    await state.clear()
+
+    info = USER_INFO.get(target_user_id)
+    if not info:
+        await message.answer(
+            f"Пользователь с ID <code>{target_user_id}</code> не найден "
+            "(ещё не запускал бота).",
+            reply_markup=admin_panel_keyboard(),
+        )
+        return
+
+    text = format_profile_text(target_user_id, info.get("full_name") or "—", info.get("username"))
+    await message.answer(text, reply_markup=admin_panel_keyboard())
+
+
+# --- Рассылка ---
+
+
+@router.callback_query(F.data == "admin:broadcast")
+async def admin_broadcast_start(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("🚫 Доступ запрещён.", show_alert=True)
+        return
+    await state.set_state(AdminStates.broadcast_text)
+    await callback.message.edit_text(
+        "📢 <b>Рассылка</b>\n\nОтправьте текст сообщения для рассылки всем пользователям:",
+        reply_markup=admin_cancel_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.broadcast_text)
+async def admin_broadcast_send(message: Message, state: FSMContext, bot: Bot) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    await state.clear()
+    text = message.html_text if message.text else None
+    if not text:
+        await message.answer("Пустое сообщение, рассылка отменена.", reply_markup=admin_panel_keyboard())
+        return
+
+    sent, failed = 0, 0
+    for user_id in list(USER_INFO.keys()):
+        try:
+            await bot.send_message(user_id, text)
+            sent += 1
+        except Exception:
+            failed += 1
+
+    await message.answer(
+        f"📢 Рассылка завершена.\nОтправлено: {sent}\nНе доставлено: {failed}",
+        reply_markup=admin_panel_keyboard(),
+    )
 
 
 # --------------------------------------------------------------------------
