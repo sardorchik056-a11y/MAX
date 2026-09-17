@@ -28,7 +28,7 @@ BOT_TOKEN = "8841055640:AAE65cYHaE9XVEo2fQLwZ5kPxrR1Fncqm5Q"
 
 # ID администраторов бота (Telegram user_id). Узнать свой ID можно, например,
 # у @userinfobot. Добавьте сюда ID всех, кому нужен доступ к админ-панели.
-ADMIN_IDS: set[int] = {8118184388}
+ADMIN_IDS: set[int] = {123456789}
 
 
 def is_admin(user_id: int) -> bool:
@@ -751,7 +751,11 @@ def check_type_keyboard() -> InlineKeyboardMarkup:
                     callback_data="checks:type:single",
                     icon_custom_emoji_id=CHECK_SINGLE_TYPE_EMOJI_ID,
                 ),
-                InlineKeyboardButton(text="Многоразовый", callback_data="checks:type:multi"),
+                InlineKeyboardButton(
+                    text="Многоразовый",
+                    callback_data="checks:type:multi",
+                    icon_custom_emoji_id="5805331990618053402",
+                ),
             ],
             [InlineKeyboardButton(text="Отмена", callback_data="checks:cancel")],
         ]
@@ -794,7 +798,15 @@ def check_restriction_keyboard() -> InlineKeyboardMarkup:
 
 def check_created_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="Готово", callback_data="checks:back")]]
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Готово",
+                    callback_data="checks:back",
+                    icon_custom_emoji_id="5774022692642492953",
+                )
+            ]
+        ]
     )
 
 
@@ -1700,7 +1712,10 @@ async def main() -> None:
 
     bot = Bot(
         token=BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        default=DefaultBotProperties(
+            parse_mode=ParseMode.HTML,
+            link_preview_is_disabled=True,
+        ),
     )
     dp = Dispatcher()
     dp.include_router(router)
