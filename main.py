@@ -1220,13 +1220,13 @@ async def checks_create_type(callback: CallbackQuery, state: FSMContext) -> None
         await state.update_data(max_activations=1)
         await state.set_state(CheckStates.create_amount)
         await callback.message.edit_text(
-            "Введите сумму, которая будет зачисляться за активацию (например, 5):",
+            '<tg-emoji emoji-id="6039614175917903752">✏</tg-emoji> <i>Введите сумму, которая будет зачисляться за активацию (например, 5):</i>',
             reply_markup=checks_cancel_keyboard(),
         )
     else:
         await state.set_state(CheckStates.create_count)
         await callback.message.edit_text(
-            "Введите количество активаций (например, 10):",
+            '<tg-emoji emoji-id="6039614175917903752">✏</tg-emoji> <i>Введите количество активаций (например, 10):</i>',
             reply_markup=checks_cancel_keyboard(),
         )
     await callback.answer()
@@ -1238,7 +1238,7 @@ async def checks_create_count(message: Message, state: FSMContext, bot: Bot) -> 
     if not raw.isdigit() or int(raw) <= 0:
         await edit_panel(
             bot, state, message.chat.id,
-            "Некорректное число. Введите количество активаций (целое число больше 0):",
+            '<tg-emoji emoji-id="6039614175917903752">✏</tg-emoji> <i>Некорректное число. Введите количество активаций (целое число больше 0):</i>',
             checks_cancel_keyboard(),
         )
         await _safe_delete(message)
@@ -1248,7 +1248,7 @@ async def checks_create_count(message: Message, state: FSMContext, bot: Bot) -> 
     await state.set_state(CheckStates.create_amount)
     await edit_panel(
         bot, state, message.chat.id,
-        "Введите сумму, которая будет зачисляться за КАЖДУЮ активацию (например, 5):",
+        '<tg-emoji emoji-id="6039614175917903752">✏</tg-emoji> <i>Введите сумму, которая будет зачисляться за КАЖДУЮ активацию (например, 5):</i>',
         checks_cancel_keyboard(),
     )
     await _safe_delete(message)
@@ -1263,7 +1263,7 @@ async def checks_create_amount(message: Message, state: FSMContext, bot: Bot) ->
     except ValueError:
         await edit_panel(
             bot, state, message.chat.id,
-            "Некорректная сумма. Введите положительное число:",
+            '<tg-emoji emoji-id="6039614175917903752">✏</tg-emoji> <i>Некорректная сумма. Введите положительное число:</i>',
             checks_cancel_keyboard(),
         )
         await _safe_delete(message)
