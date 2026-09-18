@@ -37,6 +37,7 @@ import re
 from collections import Counter
 
 from aiogram import Bot, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
@@ -51,6 +52,17 @@ except ImportError:
     from main import _safe_delete, edit_panel, get_profile_stats, log_game_round, remember_user
 
 router = Router()
+
+
+async def _safe_edit_text(message: Message, text: str, reply_markup: InlineKeyboardMarkup | None = None) -> None:
+    """Редактирует сообщение, молча игнорируя ошибку Telegram
+    "message is not modified" (когда контент/клавиатура не изменились —
+    например, повторный клик по уже активной вкладке/режиму)."""
+    try:
+        await message.edit_text(text, reply_markup=reply_markup)
+    except TelegramBadRequest as exc:
+        if "message is not modified" not in str(exc):
+            raise
 
 
 # --------------------------------------------------------------------------
@@ -388,7 +400,7 @@ async def game_tab(callback: CallbackQuery, state: FSMContext) -> None:
     mode = data.get("mode", "1") if data.get("game") == game_id else "1"
 
     text, kb = render_game_screen(callback.from_user.id, game_id, mode)
-    await callback.message.edit_text(text, reply_markup=kb)
+    await _safe_edit_text(callback.message, text, kb)
     await state.update_data(
         game=game_id,
         mode=mode,
@@ -404,7 +416,7 @@ async def game_mode_switch(callback: CallbackQuery, state: FSMContext) -> None:
     _, _, game_id, mode = callback.data.split(":")
     await state.update_data(game=game_id, mode=mode)
     text, kb = render_game_screen(callback.from_user.id, game_id, mode)
-    await callback.message.edit_text(text, reply_markup=kb)
+    await _safe_edit_text(callback.message, text, kb)
     await callback.answer()
 
 
@@ -417,7 +429,7 @@ async def game_mode_switch(callback: CallbackQuery, state: FSMContext) -> None:
 async def pair_start(callback: CallbackQuery, state: FSMContext) -> None:
     game_id = callback.data.split(":", 3)[3]
     await state.update_data(game=game_id, mode="2", pair_first=None)
-    await callback.message.edit_text(pair_pick_text(game_id, 1, None), reply_markup=pair_pick_keyboard(game_id, step=1))
+    await _safe_edit_text(callback.message, pair_pick_text(game_id, 1, None), pair_pick_keyboard(game_id, step=1))
     await callback.answer()
 
 
@@ -427,7 +439,7 @@ async def pair_first(callback: CallbackQuery, state: FSMContext) -> None:
     _, _, game_id, n = callback.data.split(":")
     first = int(n)
     await state.update_data(pair_first=first)
-    await callback.message.edit_text(pair_pick_text(game_id, 2, first), reply_markup=pair_pick_keyboard(game_id, step=2))
+    await _safe_edit_text(callback.message, pair_pick_text(game_id, 2, first), pair_pick_keyboard(game_id, step=2))
     await callback.answer()
 
 
@@ -495,6 +507,7 @@ async def _play_round(
         value = roll.dice.value
         win = check_bet_1(value, bet_type, number)
         result_line = f"Выпало: {emoji} {value}"
+        await _safe_delete(roll)
     else:
         roll1 = await bot.send_dice(chat_id, emoji=emoji)
         await asyncio.sleep(2.5)
@@ -503,6 +516,8 @@ async def _play_round(
         v1, v2 = roll1.dice.value, roll2.dice.value
         win = check_bet_2(v1, v2, bet_type, pair)
         result_line = f"Выпало: {emoji} {v1} и {emoji} {v2} (сумма {v1 + v2})"
+        await _safe_delete(roll1)
+        await _safe_delete(roll2)
 
     payout = amount * multiplier if win else 0.0
     if win:
