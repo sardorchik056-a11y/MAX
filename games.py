@@ -26,6 +26,25 @@ def set_betting_game(bg):
 def get_betting_game():
     return _shared_betting_game
 
+
+# Та же схема, что и с _shared_betting_game выше: main.py регистрирует свой
+# games_callback здесь один раз при импорте (см. games_module.set_games_callback
+# в main.py), вместо того чтобы cancel_bet делал `from main import games_callback`
+# при каждом вызове — такой импорт заново подгружал бы main.py как отдельный
+# модуль "main" (та же причина, по которой раньше расходился баланс — см.
+# шапку storage.py) и плодил бы отдельный, рассинхронизированный экземпляр
+# состояния main.py.
+_games_callback = None
+
+
+def set_games_callback(cb):
+    global _games_callback
+    _games_callback = cb
+
+
+def get_games_callback():
+    return _games_callback
+
 try:
     from database import save_game_result as db_save_game_result, update_balance as db_update_balance
 except ImportError:
@@ -1914,8 +1933,9 @@ async def cancel_bet(callback: CallbackQuery, state: FSMContext, betting_game: B
         del betting_game.pending_bets[user_id]
     await state.clear()
 
-    from main import games_callback
-    await games_callback(callback, state)
+    games_callback = get_games_callback()
+    if games_callback is not None:
+        await games_callback(callback, state)
 
 
 # --------------------------------------------------------------------------
