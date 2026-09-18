@@ -57,75 +57,30 @@ SUPPORT_TEXT = (
 )
 
 # --------------------------------------------------------------------------
-# Хранилище профилей (временное, in-memory)
+# Хранилище профилей / транзакций / баланса
 # --------------------------------------------------------------------------
-# NOTE: пока нет подключения к БД — статистика хранится в памяти процесса
-# и обнулится при перезапуске бота. Когда появится база данных, эту часть
-# нужно будет заменить на реальные запросы к ней.
+# ВАЖНО: этот блок раньше был определён прямо здесь, в main.py, а games.py
+# обращался к нему через `from main import get_profile_stats` внутри своих
+# методов. Из-за этого при запуске `python main.py` баланс в профиле и в
+# играх мог расходиться — main.py по пути импортируется ещё раз (уже как
+# модуль "main", а не "__main__"), и получается два разных словаря
+# USER_PROFILES. Подробности — в шапке storage.py.
+#
+# Теперь всё, что нужно и main.py, и games.py, лежит в одном месте —
+# storage.py, — и импортируется отсюда, чтобы обработчики ниже (профиль,
+# админка, чеки) продолжали работать без изменений.
 
-USER_PROFILES: dict[int, dict[str, float]] = {}
-
-
-def get_profile_stats(user_id: int) -> dict[str, float]:
-    """Возвращает статистику пользователя, создавая запись по умолчанию."""
-    if user_id not in USER_PROFILES:
-        USER_PROFILES[user_id] = {
-            "balance": 0.0,
-            "deposits": 0.0,
-            "withdrawals": 0.0,
-            "turnover": 0.0,
-        }
-    return USER_PROFILES[user_id]
-
-
-# --------------------------------------------------------------------------
-# Хранилище транзакций (временное, in-memory) — для статистики по периодам
-# --------------------------------------------------------------------------
-# NOTE: как и USER_PROFILES, это заглушка. Когда появится БД, депозиты и
-# выводы нужно будет логировать сюда (или сразу в БД с полем timestamp),
-# чтобы get_period_stats считал реальные суммы за день/неделю/месяц.
-
-USER_TRANSACTIONS: dict[int, list[dict]] = {}
-
-PERIOD_DAYS = {"day": 1, "week": 7, "month": 30}
-PERIOD_LABELS = {"day": "День", "week": "Неделя", "month": "Месяц"}
-
-
-def get_period_stats(user_id: int, period: str) -> dict[str, float]:
-    """Суммирует депозиты/выводы/оборот пользователя за период."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=PERIOD_DAYS.get(period, 1))
-    stats = {"deposits": 0.0, "withdrawals": 0.0, "turnover": 0.0}
-
-    for tx in USER_TRANSACTIONS.get(user_id, []):
-        if tx["timestamp"] < cutoff:
-            continue
-        if tx["type"] not in ("deposit", "withdraw"):
-            continue
-        amount = tx["amount"]
-        stats["turnover"] += amount
-        if tx["type"] == "deposit":
-            stats["deposits"] += amount
-        elif tx["type"] == "withdraw":
-            stats["withdrawals"] += amount
-
-    return stats
-
-
-def adjust_balance(user_id: int, amount: float, tx_type: str) -> float:
-    """Начисляет ('admin_grant') или списывает ('admin_deduct') баланс пользователю
-    (админское действие) и логирует операцию отдельным типом транзакции, чтобы она
-    не искажала личную статистику пользователя по депозитам/выводам."""
-    stats = get_profile_stats(user_id)
-    stats["balance"] += amount if tx_type == "admin_grant" else -amount
-
-    USER_TRANSACTIONS.setdefault(user_id, []).append(
-        {
-            "timestamp": datetime.now(timezone.utc),
-            "amount": amount,
-            "type": tx_type,
-        }
-    )
-    return stats["balance"]
+from storage import (
+    USER_PROFILES,
+    get_profile_stats,
+    USER_TRANSACTIONS,
+    PERIOD_DAYS,
+    PERIOD_LABELS,
+    get_period_stats,
+    adjust_balance,
+    USER_GAME_ROUNDS,
+    log_game_round,
+)
 
 
 # --------------------------------------------------------------------------
@@ -159,28 +114,6 @@ def get_display_name(user_id: int) -> str:
         return f"@{username}"
 
     return f"Игрок {user_id}"
-
-
-# --------------------------------------------------------------------------
-# Хранилище игровых раундов (временное, in-memory) — для топа игроков по
-# обороту, выигрышам и количеству игр.
-# --------------------------------------------------------------------------
-# NOTE: заглушка, как и USER_TRANSACTIONS. Когда появится БД и игровой
-# движок, каждый сыгранный раунд нужно будет логировать сюда (или сразу в
-# БД с полем timestamp), чтобы get_top_players считал реальные значения.
-
-USER_GAME_ROUNDS: dict[int, list[dict]] = {}
-
-
-def log_game_round(user_id: int, bet: float, win: float) -> None:
-    """Логирует сыгранный раунд игры (ставка/выигрыш) для последующего подсчёта топа."""
-    USER_GAME_ROUNDS.setdefault(user_id, []).append(
-        {
-            "timestamp": datetime.now(timezone.utc),
-            "bet": bet,
-            "win": win,
-        }
-    )
 
 
 TOP_PERIOD_DAYS = {"day": 1, "week": 7, "month": 30, "all": None}
@@ -1219,6 +1152,14 @@ async def games_section(message: Message) -> None:
     text = games_module.build_games_selector_text(betting_game, message.from_user.id)
     markup = games_module.build_games_selector_keyboard()
     await message.answer(text, reply_markup=markup)  # noqa: E402
+
+
+# games.py раньше сам делал `from main import games_callback` внутри cancel_bet
+# (см. games.py), что заново импортировало main.py как отдельный модуль (та же
+# причина расхождения баланса — см. комментарий у storage.py). Вместо этого
+# регистрируем функцию здесь, как уже сделано для betting_game через
+# set_betting_game/get_betting_game.
+games_module.set_games_callback(games_callback)
 
 
 # --- Создание чека ---
