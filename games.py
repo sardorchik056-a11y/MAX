@@ -80,12 +80,9 @@ EMOJI_LOWER      = "5233410275717198826"
 EMOJI_CHANGE     = "5224490496226797830"
 
 EMOJI_MAGNIFY       = "5231012545799666522"
-EMOJI_BET_LABEL     = "5224380154221995303"
-EMOJI_BALANCE_LABEL = "5224350849660138496"
-EMOJI_CHOOSE_GAME   = "5224708079270013673"
-EMOJI_MINES_BTN     = "5226939456514203548"
-EMOJI_TOWER_BTN     = "5224707005528188746"
-EMOJI_GOLD_BTN      = "5226770767378688325"
+EMOJI_BET_LABEL     = "5904462880941545555"  # 🪙 — "Ставка"
+EMOJI_BALANCE_LABEL = "5769126056262898415"  # 👛 — "Баланс"
+EMOJI_CHOOSE_GAME   = "5864019342873598613"  # 🧠 — "Выберите игру"
 
 # --- ТИПЫ СТАВОК ДЛЯ 1 КУБА ---
 DICE_BET_TYPES = {
@@ -574,8 +571,7 @@ async def handle_set_bet_command(message: Message, betting_game: 'BettingGame'):
     betting_game.set_current_bet(user_id, amount)
     await message.answer(
         f"<blockquote><b>✅ Ставка установлена: <code>{amount:.2f}</code>$</b></blockquote>\n\n"
-        f"<blockquote><i>Действует для Кубика, Футбола, Баскетбола, Дартса и Боулинга.\n"
-        f"Не действует для Мин, Башни и Золота.</i></blockquote>",
+        f"<blockquote><i>Действует для Кубика, Футбола, Баскетбола, Дартса и Боулинга.</i></blockquote>",
         parse_mode='HTML'
     )
 
@@ -1308,11 +1304,6 @@ def build_games_selector_keyboard() -> InlineKeyboardMarkup:
     rows.append([
         InlineKeyboardButton(text="Авторские", callback_data="custom_games_menu", icon_custom_emoji_id=EMOJI_MAGNIFY)
     ])
-    rows.append([
-        InlineKeyboardButton(text="Мины",   callback_data="mines_menu", icon_custom_emoji_id=EMOJI_MINES_BTN),
-        InlineKeyboardButton(text="Башня",  callback_data="tower_menu", icon_custom_emoji_id=EMOJI_TOWER_BTN),
-        InlineKeyboardButton(text="Золото", callback_data="gold_menu",  icon_custom_emoji_id=EMOJI_GOLD_BTN),
-    ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1321,14 +1312,14 @@ def _bet_balance_block(betting_game: 'BettingGame', user_id: int) -> str:
     bet_display = f"{current_bet:.2f}" if current_bet else "0"
     balance = betting_game.get_balance(user_id)
     return (
-        f"<blockquote>{e(EMOJI_BET_LABEL,'💰')} Ставка: <code>{bet_display}</code>{e(EMOJI_COIN,'💰')}\n"
+        f"<blockquote>{e(EMOJI_BET_LABEL,'🪙')} Ставка: <code>{bet_display}</code>{e(EMOJI_COIN,'💰')}\n"
         f"{e(EMOJI_BALANCE_LABEL,'👛')} Баланс: <code>{balance:.2f}</code>{e(EMOJI_COIN,'💰')}</blockquote>\n\n"
     )
 
 
 def build_games_selector_text(betting_game: 'BettingGame', user_id: int) -> str:
     return (
-        f"<blockquote><b>{e(EMOJI_CHOOSE_GAME,'🎮')} Выберите игру, на которую хотите сделать ставку!</b></blockquote>\n\n"
+        f"<blockquote><b>{e(EMOJI_CHOOSE_GAME,'🧠')} Выберите игру, на которую хотите сделать ставку!</b></blockquote>\n\n"
         f"{_bet_balance_block(betting_game, user_id)}"
     )
 
@@ -1454,7 +1445,7 @@ def _dice_outcome_rows(active: str) -> list:
 def build_dice_hub_keyboard(active: str) -> InlineKeyboardMarkup:
     if active not in DICE_TAB_ORDER:
         active = '1куб'
-    rows = [_dice_tabs_row(active)]
+    rows = [_tabs_row('dice'), _dice_tabs_row(active)]
     rows.extend(_dice_outcome_rows(active))
     rows.append([
         InlineKeyboardButton(text="Назад", callback_data="games", icon_custom_emoji_id=EMOJI_BACK)
@@ -1921,14 +1912,16 @@ _BET_CALLBACK_PREFIXES = (
     "bet_basketball_", "bet_football_", "bet_darts_", "bet_bowling_",
 )
 
-_IN_DEV_GAME_CALLBACKS = {"custom_games_menu", "mines_menu", "tower_menu", "gold_menu"}
+_IN_DEV_GAME_CALLBACKS = {"custom_games_menu"}
 
 _IN_DEV_GAME_TEXT = "🚧 Этот раздел находится в разработке.\nСкоро здесь появится функционал!"
 
 
-@router.callback_query(F.data.startswith("game_"))
+@router.callback_query(F.data.startswith(("game_", "gtab_")))
 async def game_category_callback(callback: CallbackQuery) -> None:
-    """Открывает меню конкретной категории игр (Кубик/Футбол/Баскетбол/Дартс/Боулинг)."""
+    """Открывает меню конкретной категории игр (Кубик/Футбол/Баскетбол/Дартс/Боулинг).
+    Ловит как кнопки выбора игры из общего селектора (game_...), так и верхний
+    ряд переключения игр внутри каждого меню (gtab_...)."""
     betting_game = get_betting_game()
     key = callback.data.split("_", 1)[1]
 
@@ -1955,7 +1948,7 @@ async def bet_button_callback(callback: CallbackQuery, state: FSMContext) -> Non
 
 @router.callback_query(F.data.in_(_IN_DEV_GAME_CALLBACKS))
 async def games_in_dev_callback(callback: CallbackQuery) -> None:
-    """Заглушка для ещё не реализованных разделов (Авторские, Мины, Башня, Золото)."""
+    """Заглушка для ещё не реализованных разделов (Авторские)."""
     await callback.answer(_IN_DEV_GAME_TEXT, show_alert=True)
 
 
