@@ -124,14 +124,16 @@ DICE_3_BET_TYPES = {
 }
 
 BASKETBALL_BET_TYPES = {
-    'баскет_гол':    {'values': [4, 5], 'multiplier': 1.85},
-    'баскет_мимо':   {'values': [1, 2, 3], 'multiplier': 1.7},
-    'баскет_3очка':  {'values': [5], 'multiplier': 5.7},
+    'баскет_промах':    {'values': [1],    'multiplier': 1.66},
+    'баскет_отскок':    {'values': [2],    'multiplier': 5.0},
+    'баскет_застрял':   {'values': [3],    'multiplier': 5.0},
+    'баскет_любойгол':  {'values': [4, 5], 'multiplier': 2.5},
+    'баскет_чистыйгол': {'values': [5],    'multiplier': 5.0},
 }
 
 FOOTBALL_BET_TYPES = {
-    'футбол_гол':  {'values': [3, 4, 5], 'multiplier': 1.35},
-    'футбол_мимо': {'values': [1, 2],    'multiplier': 1.75},
+    'футбол_гол':  {'values': [3, 4, 5], 'multiplier': 1.65},
+    'футбол_мимо': {'values': [1, 2],    'multiplier': 2.5},
     # --- точные исходы (по одному на каждое из 5 значений эмодзи ⚽) ---
     'футбол_штанга':    {'values': [2], 'multiplier': 5.0},
     'футбол_мимоворот': {'values': [1], 'multiplier': 5.0},
@@ -193,7 +195,8 @@ BET_TYPE_TO_CODE = {
     'куб2_конкретныйдубль': 's_sdbl', 'куб2_произведение': 's_prod',
     'куб3_3чет': 't_ev', 'куб3_3нечет': 't_od', 'куб3_больше10': 't_gt10', 'куб3_меньше10': 't_lt10',
     'куб3_любойтрипл': 't_trp', 'куб3_конкретныйтрипл': 't_strp', 'куб3_произведение': 't_prod',
-    'баскет_гол': 'bk_g', 'баскет_мимо': 'bk_m', 'баскет_3очка': 'bk_3',
+    'баскет_промах': 'bk_m', 'баскет_отскок': 'bk_o', 'баскет_застрял': 'bk_z',
+    'баскет_любойгол': 'bk_g', 'баскет_чистыйгол': 'bk_c',
     'футбол_гол': 'fb_g', 'футбол_мимо': 'fb_m',
     'футбол_штанга': 'fb_p', 'футбол_мимоворот': 'fb_w', 'футбол_угол': 'fb_a',
     'футбол_центр': 'fb_c', 'футбол_девятка': 'fb_9',
@@ -214,8 +217,9 @@ _OUTCOME_LABELS = {
     'куб2_произведение': 'Произведение ≥18',
     'куб3_3чет': 'Три чёт', 'куб3_3нечет': 'Три нечёт', 'куб3_больше10': 'Три больше (4-6)', 'куб3_меньше10': 'Три меньше (1-3)',
     'куб3_любойтрипл': 'Любой трипл', 'куб3_произведение': 'Произведение ≥108',
-    'баскет_гол': 'Гол', 'баскет_мимо': 'Мимо', 'баскет_3очка': '3-очковый',
-    'футбол_гол': 'Гол', 'футбол_мимо': 'Мимо',
+    'баскет_промах': 'Промах', 'баскет_отскок': 'Отскок', 'баскет_застрял': 'Застрял',
+    'баскет_любойгол': 'Любой гол', 'баскет_чистыйгол': 'Чистый гол',
+    'футбол_гол': 'Любой гол', 'футбол_мимо': 'Промах',
     'футбол_штанга': 'Штанга', 'футбол_мимоворот': 'Мимо ворот', 'футбол_угол': 'Гол под углом',
     'футбол_центр': 'Гол в центр', 'футбол_девятка': 'Девятка', 'футбол_любойдубль': 'Любой дубль',
     'дартс_белое': 'Белое', 'дартс_красное': 'Красное', 'дартс_мимо': 'Мимо', 'дартс_центр': 'Центр',
@@ -341,11 +345,22 @@ COMMAND_MAPPING = {
 }
 
 BET_TYPE_MAPPING = {
-    '3очка':    'баскет_3очка',
-    '3points':  'баскет_3очка',
-    '3':        'баскет_3очка',
-    'три':      'баскет_3очка',
-    'three':    'баскет_3очка',
+    '3очка':      'баскет_чистыйгол',
+    '3points':    'баскет_чистыйгол',
+    '3':          'баскет_чистыйгол',
+    'три':        'баскет_чистыйгол',
+    'three':      'баскет_чистыйгол',
+    'чистыйгол':  'баскет_чистыйгол',
+    'чистый':     'баскет_чистыйгол',
+    'clean':      'баскет_чистыйгол',
+    'застрял':    'баскет_застрял',
+    'stuck':      'баскет_застрял',
+    'отскок':     'баскет_отскок',
+    'rebound':    'баскет_отскок',
+    'bounce':     'баскет_отскок',
+    'любойгол':   'баскет_любойгол',
+    'anygoal':    'баскет_любойгол',
+    'промах':     'баскет_промах',
     'нечет':    'куб_нечет',
     'odd':      'куб_нечет',
     'нечетное': 'куб_нечет',
@@ -515,16 +530,16 @@ def parse_bet_command(text: str) -> Optional[Tuple[str, float]]:
     if not game_prefix:
         return None
     if game_prefix == 'баскет':
-        if bet_type_key in ['гол', 'goal']:
-            full_bet_type = 'баскет_гол'
-        elif bet_type_key in ['мимо', 'miss']:
-            full_bet_type = 'баскет_мимо'
+        if bet_type_key in ['гол', 'goal', 'любойгол', 'anygoal']:
+            full_bet_type = 'баскет_любойгол'
+        elif bet_type_key in ['мимо', 'miss', 'промах']:
+            full_bet_type = 'баскет_промах'
         else:
             full_bet_type = BET_TYPE_MAPPING.get(bet_type_key)
     elif game_prefix == 'футбол':
-        if bet_type_key in ['гол', 'goal']:
+        if bet_type_key in ['гол', 'goal', 'любойгол', 'anygoal']:
             full_bet_type = 'футбол_гол'
-        elif bet_type_key in ['мимо', 'miss']:
+        elif bet_type_key in ['мимо', 'miss', 'промах']:
             full_bet_type = 'футбол_мимо'
         else:
             full_bet_type = BET_TYPE_MAPPING.get(bet_type_key)
@@ -1536,11 +1551,15 @@ def _build_basketball_menu_content(betting_game: 'BettingGame' = None, user_id: 
     markup = InlineKeyboardMarkup(inline_keyboard=[
         _tabs_row('basketball'),
         [
-            InlineKeyboardButton(text="3-очковый (x5.7)", callback_data="bet_basketball_баскет_3очка")
+            InlineKeyboardButton(text="Любой гол (x2.5)", callback_data="bet_basketball_баскет_любойгол"),
+            InlineKeyboardButton(text="Чистый гол (x5)", callback_data="bet_basketball_баскет_чистыйгол")
         ],
         [
-            InlineKeyboardButton(text="Гол (x1.85)", callback_data="bet_basketball_баскет_гол"),
-            InlineKeyboardButton(text="Мимо (x1.7)", callback_data="bet_basketball_баскет_мимо")
+            InlineKeyboardButton(text="Промах (x1.66)", callback_data="bet_basketball_баскет_промах")
+        ],
+        [
+            InlineKeyboardButton(text="Отскок (x5)", callback_data="bet_basketball_баскет_отскок"),
+            InlineKeyboardButton(text="Застрял (x5)", callback_data="bet_basketball_баскет_застрял")
         ],
         [
             InlineKeyboardButton(text="Назад", callback_data="games", icon_custom_emoji_id=EMOJI_BACK)
@@ -1565,8 +1584,8 @@ def _build_football_menu_content(betting_game: 'BettingGame' = None, user_id: in
     markup = InlineKeyboardMarkup(inline_keyboard=[
         _tabs_row('football'),
         [
-            InlineKeyboardButton(text="Гол (x1.35)", callback_data="bet_football_футбол_гол"),
-            InlineKeyboardButton(text="Мимо (x1.75)", callback_data="bet_football_футбол_мимо")
+            InlineKeyboardButton(text="Любой гол (x1.65)", callback_data="bet_football_футбол_гол"),
+            InlineKeyboardButton(text="Промах (x2.5)", callback_data="bet_football_футбол_мимо")
         ],
         [
             InlineKeyboardButton(text="Штанга (x5)", callback_data="bet_football_футбол_штанга"),
