@@ -1191,7 +1191,34 @@ async def edit_panel(
 # Импортируется здесь (а не в начале файла), потому что games.py на этапе
 # своего импорта уже обращается к remember_user/get_profile_stats/log_game_round/
 # edit_panel/_safe_delete — они должны быть определены к этому моменту.
-from games import router as games_router  # noqa: E402
+import games as games_module
+
+games_router = games_module.router
+
+
+@router.callback_query(F.data == "games")
+async def games_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Открывает селектор игр (Кубик/Футбол/Баскетбол/Дартс/Боулинг). Ссылается
+    отсюда сама games.py (кнопки «Назад» и отмена ставки), поэтому функция
+    называется именно games_callback и определена в main.py."""
+    remember_user(callback.from_user)
+    betting_game = games_module.get_betting_game()
+    if betting_game is None:
+        await callback.answer("❌ Бот перезапускается, попробуйте ещё раз чуть позже", show_alert=True)
+        return
+    await games_module.show_games_selector(callback, betting_game)
+
+
+@router.message(F.text == "Игры")
+async def games_section(message: Message) -> None:
+    remember_user(message.from_user)
+    betting_game = games_module.get_betting_game()
+    if betting_game is None:
+        await message.answer(IN_DEV_TEXT)
+        return
+    text = games_module.build_games_selector_text(betting_game, message.from_user.id)
+    markup = games_module.build_games_selector_keyboard()
+    await message.answer(text, reply_markup=markup)  # noqa: E402
 
 
 # --- Создание чека ---
@@ -1720,6 +1747,11 @@ async def main() -> None:
     dp = Dispatcher()
     dp.include_router(router)
     dp.include_router(games_router)
+
+    # Создаёт единственный экземпляр BettingGame и регистрирует его как
+    # общий для games.py (через set_betting_game внутри __init__), чтобы все
+    # хендлеры раздела «Игры» могли получить его через get_betting_game().
+    games_module.BettingGame(bot)
 
     global BOT_USERNAME
     me = await bot.get_me()
