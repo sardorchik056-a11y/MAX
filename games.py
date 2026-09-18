@@ -47,9 +47,23 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 # Если у вас другой способ запуска (например, `python -m main`) — сработает
 # запасной вариант `from main import ...`.
 try:
-    from __main__ import _safe_delete, edit_panel, get_profile_stats, log_game_round, remember_user
+    from __main__ import (
+        _safe_delete,
+        edit_panel,
+        get_display_name,
+        get_profile_stats,
+        log_game_round,
+        remember_user,
+    )
 except ImportError:
-    from main import _safe_delete, edit_panel, get_profile_stats, log_game_round, remember_user
+    from main import (
+        _safe_delete,
+        edit_panel,
+        get_display_name,
+        get_profile_stats,
+        log_game_round,
+        remember_user,
+    )
 
 router = Router()
 
@@ -331,6 +345,22 @@ def pair_pick_text(game_id: str, step: int, first: int | None) -> str:
     )
 
 
+def format_bet_label(mode: str, bet_type: str, number: int | None, pair: tuple[int, int] | None) -> str:
+    """Человекочитаемая подпись выбранного исхода — для объявления ставки в чате."""
+    label = BET_LABELS[(mode, bet_type)]
+    if number is not None:
+        label += f" {number}"
+    if pair is not None:
+        label += f" ({pair[0]} и {pair[1]})"
+    return label
+
+
+def format_bet_announcement(display_name: str, amount: float, label: str, multiplier: float) -> str:
+    """Сообщение-объявление ставки: "Игрок 5544 ставит $0.10 на «Чёт» (x2)".
+    Куб/эмодзи бросается ОТВЕТОМ на это сообщение."""
+    return f"🎲 <b>{display_name}</b> ставит <b>${amount:,.2f}</b> на «{label}» (x{multiplier:g})"
+
+
 def format_round_result_text(win: bool, result_line: str, amount: float, multiplier: float, new_balance: float) -> str:
     if win:
         payout = amount * multiplier
@@ -501,17 +531,24 @@ async def _play_round(
     multiplier = MULTIPLIERS[(mode, bet_type)]
     profile["balance"] -= amount
 
+    # Объявление ставки в чате ("Игрок 5544 ставит $0.10 на «Чёт» (x2)"),
+    # куб/эмодзи бросается ОТВЕТОМ на это сообщение.
+    display_name = get_display_name(user_id)
+    label = format_bet_label(mode, bet_type, number, pair)
+    announcement = await bot.send_message(chat_id, format_bet_announcement(display_name, amount, label, multiplier))
+    reply_to_id = announcement.message_id
+
     if mode == "1":
-        roll = await bot.send_dice(chat_id, emoji=emoji)
+        roll = await bot.send_dice(chat_id, emoji=emoji, reply_to_message_id=reply_to_id)
         await asyncio.sleep(4)
         value = roll.dice.value
         win = check_bet_1(value, bet_type, number)
         result_line = f"Выпало: {emoji} {value}"
         await _safe_delete(roll)
     else:
-        roll1 = await bot.send_dice(chat_id, emoji=emoji)
+        roll1 = await bot.send_dice(chat_id, emoji=emoji, reply_to_message_id=reply_to_id)
         await asyncio.sleep(2.5)
-        roll2 = await bot.send_dice(chat_id, emoji=emoji)
+        roll2 = await bot.send_dice(chat_id, emoji=emoji, reply_to_message_id=reply_to_id)
         await asyncio.sleep(4)
         v1, v2 = roll1.dice.value, roll2.dice.value
         win = check_bet_2(v1, v2, bet_type, pair)
