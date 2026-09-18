@@ -544,7 +544,6 @@ async def _play_round(
         value = roll.dice.value
         win = check_bet_1(value, bet_type, number)
         result_line = f"Выпало: {emoji} {value}"
-        await _safe_delete(roll)
     else:
         roll1 = await bot.send_dice(chat_id, emoji=emoji, reply_to_message_id=reply_to_id)
         await asyncio.sleep(2.5)
@@ -553,8 +552,10 @@ async def _play_round(
         v1, v2 = roll1.dice.value, roll2.dice.value
         win = check_bet_2(v1, v2, bet_type, pair)
         result_line = f"Выпало: {emoji} {v1} и {emoji} {v2} (сумма {v1 + v2})"
-        await _safe_delete(roll1)
-        await _safe_delete(roll2)
+
+    # Сообщение-объявление ставки было нужно только как "подложка" для ответа
+    # кубом — само оно в чате больше не нужно, удаляем.
+    await _safe_delete(announcement)
 
     payout = amount * multiplier if win else 0.0
     if win:
@@ -562,8 +563,15 @@ async def _play_round(
     log_game_round(user_id, bet=amount, win=payout)
 
     await state.update_data(game=game_id, mode=mode)
+
+    # Результат — отдельным новым сообщением (не перезаписывает панель).
     result_text = format_round_result_text(win, result_line, amount, multiplier, profile["balance"])
-    await edit_panel(bot, state, chat_id, result_text, game_screen_keyboard(game_id, mode))
+    await bot.send_message(chat_id, result_text)
+
+    # Панель (Ставка/Баланс + кнопки исходов) обновляем отдельно — с новым
+    # балансом, чтобы сразу можно было сделать следующую ставку.
+    panel_text, panel_kb = render_game_screen(user_id, game_id, mode)
+    await edit_panel(bot, state, chat_id, panel_text, panel_kb)
 
 
 # --------------------------------------------------------------------------
