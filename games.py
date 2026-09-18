@@ -62,7 +62,7 @@ def e(eid: str, fallback: str = "•") -> str:
 
 EMOJI_BACK   = "5233735937317447077"
 EMOJI_CROSS  = "5906949717859230132"
-EMOJI_COIN   = "5116648080787112958"
+EMOJI_COIN   = "5285484782791177666"  # 💲
 EMOJI_CHET       = "5330320040883411678"
 EMOJI_NECHET     = "5391032818111363540"
 EMOJI_MORE       = "5449683594425410231"
@@ -639,9 +639,9 @@ def _build_win_text(nickname: str, user_id: int, amount: float, outcome_label: s
     return (
         f"<b>Игрок {nickname} (ID: <code>{user_id}</code>) выигрывает"
         f"<tg-emoji emoji-id=\"5461151367559141950\">🎉</tg-emoji></b>\n\n"
-        f"<blockquote>Ставка: <code>{amount:.2f}</code>{e(EMOJI_COIN,'💰')} на «<b>{outcome_label}</b>»</blockquote>\n"
+        f"<blockquote>Ставка: <code>{amount:.2f}</code>{e(EMOJI_COIN,'💲')} на «<b>{outcome_label}</b>»</blockquote>\n"
         f"<blockquote><code>{winnings:.2f}</code>"
-        f"{e(EMOJI_COIN,'💰')} "
+        f"{e(EMOJI_COIN,'💲')} "
         f"Успешно зачислены на баланс!</blockquote>\n"
         f"<blockquote><tg-emoji emoji-id=\"5461151367559141950\">🎉</tg-emoji>"
         f"Поздравляем!</blockquote>"
@@ -652,7 +652,7 @@ def _build_lose_text(nickname: str, user_id: int, amount: float, outcome_label: 
     return (
         f"<b>Игрок {nickname} (ID: <code>{user_id}</code>) проигрывает"
         f"<tg-emoji emoji-id=\"5422858869372104873\">❌</tg-emoji></b>\n\n"
-        f"<blockquote>Ставка: <code>{amount:.2f}</code>{e(EMOJI_COIN,'💰')} на «<b>{outcome_label}</b>» — не сыграла.</blockquote>\n"
+        f"<blockquote>Ставка: <code>{amount:.2f}</code>{e(EMOJI_COIN,'💲')} на «<b>{outcome_label}</b>» — не сыграла.</blockquote>\n"
         f"<blockquote><b><i>Это не повод сдаваться! "
         f"Пробуй снова и снова до победного!</i></b></blockquote>\n"
         f"<blockquote><tg-emoji emoji-id=\"5305699699204837855\">🎉</tg-emoji>"
@@ -1010,7 +1010,7 @@ async def _run_game(
     emoji = _bet_emoji_for(bet_type)
 
     bet_text = (
-        f"{emoji} <b>{nickname}</b> ставит <code>{amount:.2f}</code>{e(EMOJI_COIN,'💰')} "
+        f"{emoji} <b>{nickname}</b> ставит <code>{amount:.2f}</code>{e(EMOJI_COIN,'💲')} "
         f"(x{_fmt_mult(mult)}) на «<b>{outcome_label}</b>»"
     )
     bet_msg = await betting_game.bot.send_message(chat_id, bet_text, parse_mode='HTML')
@@ -1312,8 +1312,8 @@ def _bet_balance_block(betting_game: 'BettingGame', user_id: int) -> str:
     bet_display = f"{current_bet:.2f}" if current_bet else "0"
     balance = betting_game.get_balance(user_id)
     return (
-        f"<blockquote>{e(EMOJI_BET_LABEL,'🪙')} Ставка: <code>{bet_display}</code>{e(EMOJI_COIN,'💰')}\n"
-        f"{e(EMOJI_BALANCE_LABEL,'👛')} Баланс: <code>{balance:.2f}</code>{e(EMOJI_COIN,'💰')}</blockquote>\n\n"
+        f"<blockquote>{e(EMOJI_BET_LABEL,'🪙')} Ставка: <code>{bet_display}</code>{e(EMOJI_COIN,'💲')}\n"
+        f"{e(EMOJI_BALANCE_LABEL,'👛')} Баланс: <code>{balance:.2f}</code>{e(EMOJI_COIN,'💲')}</blockquote>\n\n"
     )
 
 
@@ -1341,6 +1341,12 @@ DICE_TAB_EMOJI = {
     '3куба': '🎲🎲🎲',
 }
 
+DICE_TAB_LABEL = {
+    '1куб': '1 бросок',
+    '2куба': '2 броска',
+    '3куба': '3 броска',
+}
+
 DICE_TAB_TITLE = {
     '1куб': '1 Куб',
     '2куба': '2 Куба',
@@ -1351,8 +1357,8 @@ DICE_TAB_TITLE = {
 def _dice_tabs_row(active: str) -> list:
     row = []
     for key in DICE_TAB_ORDER:
-        emoji = DICE_TAB_EMOJI[key]
-        text = f"· {emoji} ·" if key == active else emoji
+        label = DICE_TAB_LABEL[key]
+        text = f"· {label} ·" if key == active else label
         row.append(InlineKeyboardButton(text=text, callback_data=f"dtabs_{key}"))
     return row
 
