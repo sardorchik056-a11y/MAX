@@ -49,6 +49,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+import refs
 from storage import adjust_balance, get_profile_stats
 
 # --------------------------------------------------------------------------
@@ -616,6 +617,10 @@ async def _settle_paid(bot: Bot, dep: sqlite3.Row) -> bool:
         "[deposit] user=%s provider=%s invoice=%s +%.2f USD -> balance %.2f",
         dep["user_id"], dep["provider"], dep["invoice_id"], dep["amount"], new_balance,
     )
+
+    # Партнёрка: пригласивший получает % с этого пополнения (один счёт — одно начисление).
+    # reward_referrer сам ловит любые ошибки и не может сломать зачисление депозита.
+    await refs.reward_referrer(bot, dep["user_id"], dep["amount"], f"{dep['provider']}:{dep['invoice_id']}")
 
     text = (
         f"{DEPOSIT_ICON} <b>Пополнение зачислено</b>\n\n"
