@@ -56,7 +56,7 @@ from storage import adjust_balance, get_profile_stats
 #
 # Пустая строка = провайдер отключён (кнопка покажет «временно недоступен»).
 CRYPTOBOT_TOKEN = "582363:AALEf7JOugnrQyrkMHzH5UrO7pdOjjYnTQy"   # <- вставьте API Token из @CryptoBot
-XROCKET_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhcHBJZCI6IjMwMDgzMiIsImp0aSI6ImFwcDozMDA4MzI6N2ZkMTE5ODUtMzZhMy00YzY3LWE3YWQtYmUxYjBmYWY0YzU2IiwiaWF0IjoxNzg5ODAwOTg0fQ.hYCCWeXzF_Z5EPzPPIUZXGjQ4B-c4BMICd9hJGXHTHA"     # <- вставьте API Token из @xRocket
+XROCKET_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhcHBJZCI6IjMwMDgzMiIsImp0aSI6ImFwcDozMDA4MzI6ZTM5MDM0ZmMtMWU2MC00MjdjLWEzNjktOWU2ZDI3YzQ3YWI0IiwiaWF0IjoxNzg5ODAxMjcwfQ.ZD9DA2KUtwes2rDwKEreoRzUuRSqw_0hB9kQWgM_7c0"     # <- вставьте API Token из @xRocket
 
 CRYPTOBOT_TESTNET = False
 XROCKET_TESTNET = False
@@ -77,6 +77,13 @@ CHECK_BUTTON_COOLDOWN_SECONDS = 4
 DB_PATH = Path(__file__).with_name("deposits.db")
 
 EMOJI_BACK = "6039539366177541657"     # тот же, что в main.py/games.py
+
+# Кастомные эмодзи (кнопки: icon_custom_emoji_id, тексты: <tg-emoji>)
+EMOJI_DEPOSIT = "5879814368572478751"      # 🏧 заголовки «Пополнение баланса»
+EMOJI_CRYPTOBOT = "5798650400189980129"    # 💵 CryptoBot
+EMOJI_XROCKET = "5798534328698805312"      # 🚀 xRocket
+EMOJI_PAY = "5836907383292436018"          # 💎 кнопка «Оплатить»
+EMOJI_CHECK = "6039859895291877126"        # 💎 кнопка «Проверить оплату»
 
 log = logging.getLogger("payments")
 
@@ -110,6 +117,14 @@ class ProviderInvoice:
     pay_url: str
 
 
+def _tge(emoji_id: str, fallback: str) -> str:
+    """Кастомный эмодзи для текста сообщения (parse_mode=HTML)."""
+    return f'<tg-emoji emoji-id="{emoji_id}">{fallback}</tg-emoji>'
+
+
+DEPOSIT_ICON = _tge(EMOJI_DEPOSIT, "🏧")
+
+
 def _normalize_status(raw: str | None) -> str:
     """Приводим статусы провайдеров к: paid / expired / pending."""
     if raw == "paid":
@@ -127,6 +142,8 @@ def _normalize_status(raw: str | None) -> str:
 class CryptoBotClient:
     key = "cryptobot"
     title = "CryptoBot"
+    emoji_id = EMOJI_CRYPTOBOT
+    emoji_char = "💵"
 
     def __init__(self, token: str, testnet: bool = False, base_url: str | None = None):
         self.token = token
@@ -196,6 +213,8 @@ class CryptoBotClient:
 class XRocketClient:
     key = "xrocket"
     title = "xRocket"
+    emoji_id = EMOJI_XROCKET
+    emoji_char = "🚀"
 
     def __init__(self, token: str, testnet: bool = False, base_url: str | None = None):
         self.token = token
@@ -276,6 +295,11 @@ class XRocketClient:
 cryptobot = CryptoBotClient(CRYPTOBOT_TOKEN, CRYPTOBOT_TESTNET)
 xrocket = XRocketClient(XROCKET_TOKEN, XROCKET_TESTNET)
 PROVIDERS: dict[str, CryptoBotClient | XRocketClient] = {cryptobot.key: cryptobot, xrocket.key: xrocket}
+
+
+def _provider_label(provider: CryptoBotClient | XRocketClient) -> str:
+    """«💵 CryptoBot» для текста сообщения (с кастомным эмодзи)."""
+    return f"{_tge(provider.emoji_id, provider.emoji_char)} {provider.title}"
 
 
 # --------------------------------------------------------------------------
@@ -418,8 +442,8 @@ async def _settle_paid(bot: Bot, dep: sqlite3.Row) -> bool:
     )
 
     text = (
-        "<b>Пополнение зачислено</b>\n\n"
-        f"┌ Способ: <b>{PROVIDERS[dep['provider']].title}</b>\n"
+        f"{DEPOSIT_ICON} <b>Пополнение зачислено</b>\n\n"
+        f"┌ Способ: <b>{_provider_label(PROVIDERS[dep['provider']])}</b>\n"
         f"├ Сумма: <b>{_fmt_usd(dep['amount'])}</b>\n"
         f"└ Баланс: <b>{_fmt_usd(get_profile_stats(dep['user_id'])['balance'])}</b>"
     )
@@ -440,7 +464,7 @@ async def _apply_status(bot: Bot, dep: sqlite3.Row, status: str | None) -> str:
     too_old = time.time() - dep["created_at"] > INVOICE_TTL_SECONDS + EXPIRE_GRACE_SECONDS
     if status == "expired" or too_old:
         if await _run(_db_mark_expired, dep["id"]):
-            await _edit_invoice_message(bot, dep, "<b>Счёт истёк</b>\n\nСоздайте новый счёт для пополнения.")
+            await _edit_invoice_message(bot, dep, f"{DEPOSIT_ICON} <b>Счёт истёк</b>\n\nСоздайте новый счёт для пополнения.")
         return "expired"
     return "pending"
 
@@ -545,8 +569,20 @@ def _back_button(callback_data: str) -> list[InlineKeyboardButton]:
 def _methods_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=cryptobot.title, callback_data=f"dep:m:{cryptobot.key}")],
-            [InlineKeyboardButton(text=xrocket.title, callback_data=f"dep:m:{xrocket.key}")],
+            [
+                InlineKeyboardButton(
+                    text=cryptobot.title,
+                    callback_data=f"dep:m:{cryptobot.key}",
+                    icon_custom_emoji_id=cryptobot.emoji_id,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=xrocket.title,
+                    callback_data=f"dep:m:{xrocket.key}",
+                    icon_custom_emoji_id=xrocket.emoji_id,
+                )
+            ],
             _back_button("menu:profile"),
         ]
     )
@@ -565,7 +601,7 @@ async def show_deposit_methods(callback: CallbackQuery, state: FSMContext) -> No
     """Экран выбора способа пополнения (вызывается из main.py по кнопке «Пополнить»)."""
     await state.clear()
     await callback.message.edit_text(
-        "<b>Пополнение баланса</b>\n\n"
+        f"{DEPOSIT_ICON} <b>Пополнение баланса</b>\n\n"
         "<i>Выберите способ оплаты. Счёт создаётся автоматически, "
         "баланс пополнится сразу после оплаты.</i>",
         reply_markup=_methods_keyboard(),
@@ -587,7 +623,7 @@ async def deposit_method_chosen(callback: CallbackQuery, state: FSMContext) -> N
     await state.set_state(DepositStates.waiting_amount)
     await state.update_data(dep_provider=provider_key, dep_ts=time.time())
     await callback.message.edit_text(
-        f"<b>Пополнение — {provider.title}</b>\n\n"
+        f"{DEPOSIT_ICON} <b>Пополнение — {_provider_label(provider)}</b>\n\n"
         f"<i>Выберите сумму или отправьте её в чат числом (от {MIN_DEPOSIT_USD:g}$ до {MAX_DEPOSIT_USD:g}$).</i>",
         reply_markup=_amount_keyboard(provider_key),
     )
@@ -609,11 +645,11 @@ async def _create_deposit(bot: Bot, user_id: int, provider_key: str, amount: flo
     return dep_id, invoice.pay_url, provider.title
 
 
-def _invoice_text(provider_title: str, amount: float) -> str:
+def _invoice_text(provider_key: str, amount: float) -> str:
     minutes = INVOICE_TTL_SECONDS // 60
     return (
-        "<b>Счёт на пополнение создан</b>\n\n"
-        f"┌ Способ: <b>{provider_title}</b>\n"
+        f"{DEPOSIT_ICON} <b>Счёт на пополнение создан</b>\n\n"
+        f"┌ Способ: <b>{_provider_label(PROVIDERS[provider_key])}</b>\n"
         f"├ Сумма: <b>{_fmt_usd(amount)}</b>\n"
         f"└ Действует: <b>{minutes} мин</b>\n\n"
         "<i>Оплатите счёт по кнопке ниже — баланс пополнится автоматически. "
@@ -624,8 +660,14 @@ def _invoice_text(provider_title: str, amount: float) -> str:
 def _invoice_keyboard(dep_id: int, pay_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Оплатить", url=pay_url)],
-            [InlineKeyboardButton(text="Проверить оплату", callback_data=f"dep:c:{dep_id}")],
+            [InlineKeyboardButton(text="Оплатить", url=pay_url, icon_custom_emoji_id=EMOJI_PAY)],
+            [
+                InlineKeyboardButton(
+                    text="Проверить оплату",
+                    callback_data=f"dep:c:{dep_id}",
+                    icon_custom_emoji_id=EMOJI_CHECK,
+                )
+            ],
             _back_button("menu:profile"),
         ]
     )
@@ -641,7 +683,7 @@ async def _start_deposit(
     if await _run(_db_count_pending, user_id) >= MAX_PENDING_PER_USER:
         return "У вас уже есть неоплаченные счета. Оплатите их или дождитесь истечения."
     try:
-        dep_id, pay_url, title = await _create_deposit(bot, user_id, provider_key, amount)
+        dep_id, pay_url, _title = await _create_deposit(bot, user_id, provider_key, amount)
     except PaymentError as ex:
         log.warning("[deposit] не удалось создать счёт: %s", ex)
         return f"Не удалось создать счёт: {ex}"
@@ -651,7 +693,7 @@ async def _start_deposit(
 
     if provider_key == xrocket.key:
         _xr_wake.set()
-    text, kb = _invoice_text(title, amount), _invoice_keyboard(dep_id, pay_url)
+    text, kb = _invoice_text(provider_key, amount), _invoice_keyboard(dep_id, pay_url)
     if panel is not None:
         try:
             await panel.edit_text(text, reply_markup=kb)
