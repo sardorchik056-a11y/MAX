@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: telegram-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    healthCheckPath: /
+    envVars:
+      - key: BOT_TOKEN
+        sync: false        # задать вручную в Render: Environment → BOT_TOKEN
+      - key: WEBHOOK_SECRET
+        generateValue: true  # Render сам сгенерирует и зафиксирует случайное значение
+      - key: PYTHON_VERSION
+        value: 3.11.9
