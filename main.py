@@ -70,6 +70,8 @@ SUPPORT_TEXT = (
 # storage.py, — и импортируется отсюда, чтобы обработчики ниже (профиль,
 # админка, чеки) продолжали работать без изменений.
 
+import ui
+from ui import edit_any, edit_by_id, send_menu, show_menu_screen
 from storage import (
     USER_PROFILES,
     get_profile_stats,
@@ -976,7 +978,7 @@ async def show_menu(message: Message) -> None:
         '<tg-emoji emoji-id="5886676966102274844">👆</tg-emoji> '
         "Выберите раздел ниже:"
     )
-    await message.answer(text, reply_markup=menu_inline_keyboard())
+    await send_menu(message, text, menu_inline_keyboard())
 
 
 @router.message(F.text == "Партнеры")
@@ -991,7 +993,7 @@ async def profile_section(callback: CallbackQuery) -> None:
     remember_user(user)
     text = format_profile_text(user.id, user.full_name, user.username)
 
-    await callback.message.edit_text(text, reply_markup=profile_inline_keyboard())
+    await edit_any(callback.message, text, reply_markup=profile_inline_keyboard())
     await callback.answer()
 
 
@@ -1011,7 +1013,7 @@ async def profile_withdraw(callback: CallbackQuery, state: FSMContext) -> None:
 async def stats_section(callback: CallbackQuery) -> None:
     remember_user(callback.from_user)
     text = format_stats_text(callback.from_user.id, "day")
-    await callback.message.edit_text(text, reply_markup=stats_period_keyboard())
+    await edit_any(callback.message, text, reply_markup=stats_period_keyboard())
     await callback.answer()
 
 
@@ -1020,7 +1022,7 @@ async def stats_period_switch(callback: CallbackQuery) -> None:
     remember_user(callback.from_user)
     period = callback.data.split(":", 1)[1]
     text = format_stats_text(callback.from_user.id, period)
-    await callback.message.edit_text(text, reply_markup=stats_period_keyboard())
+    await edit_any(callback.message, text, reply_markup=stats_period_keyboard())
     await callback.answer()
 
 
@@ -1028,7 +1030,7 @@ async def stats_period_switch(callback: CallbackQuery) -> None:
 async def top_section(callback: CallbackQuery) -> None:
     remember_user(callback.from_user)
     text = format_top_text("turnover", "day")
-    await callback.message.edit_text(text, reply_markup=top_keyboard("turnover", "day"))
+    await edit_any(callback.message, text, reply_markup=top_keyboard("turnover", "day"))
     await callback.answer()
 
 
@@ -1037,14 +1039,14 @@ async def top_switch(callback: CallbackQuery) -> None:
     remember_user(callback.from_user)
     _, category, period = callback.data.split(":", 2)
     text = format_top_text(category, period)
-    await callback.message.edit_text(text, reply_markup=top_keyboard(category, period))
+    await edit_any(callback.message, text, reply_markup=top_keyboard(category, period))
     await callback.answer()
 
 
 @router.callback_query(F.data == "menu:support")
 async def support_section(callback: CallbackQuery) -> None:
     remember_user(callback.from_user)
-    await callback.message.edit_text(SUPPORT_TEXT, reply_markup=support_inline_keyboard())
+    await edit_any(callback.message, SUPPORT_TEXT, reply_markup=support_inline_keyboard())
     await callback.answer()
 
 
@@ -1059,7 +1061,7 @@ async def back_to_menu(callback: CallbackQuery) -> None:
         '<tg-emoji emoji-id="5886676966102274844">👆</tg-emoji> '
         "Выберите раздел ниже:"
     )
-    await callback.message.edit_text(text, reply_markup=menu_inline_keyboard())
+    await show_menu_screen(callback.message, text, menu_inline_keyboard())
     await callback.answer()
 
 
@@ -1072,21 +1074,21 @@ async def back_to_menu(callback: CallbackQuery) -> None:
 async def checks_section(callback: CallbackQuery, state: FSMContext) -> None:
     remember_user(callback.from_user)
     await state.clear()
-    await callback.message.edit_text(format_checks_menu_text(), reply_markup=checks_menu_keyboard())
+    await edit_any(callback.message, format_checks_menu_text(), reply_markup=checks_menu_keyboard())
     await callback.answer()
 
 
 @router.callback_query(F.data == "checks:back")
 async def checks_back(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    await callback.message.edit_text(format_checks_menu_text(), reply_markup=checks_menu_keyboard())
+    await edit_any(callback.message, format_checks_menu_text(), reply_markup=checks_menu_keyboard())
     await callback.answer()
 
 
 @router.callback_query(F.data == "checks:cancel")
 async def checks_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    await callback.message.edit_text(format_checks_menu_text(), reply_markup=checks_menu_keyboard())
+    await edit_any(callback.message, format_checks_menu_text(), reply_markup=checks_menu_keyboard())
     await callback.answer("Отменено")
 
 
@@ -1115,9 +1117,7 @@ async def edit_panel(
 
     if panel_message_id:
         try:
-            await bot.edit_message_text(
-                text, chat_id=panel_chat_id, message_id=panel_message_id, reply_markup=reply_markup
-            )
+            await edit_by_id(bot, panel_chat_id, panel_message_id, text, reply_markup)
             return
         except Exception:
             pass
@@ -1193,7 +1193,7 @@ async def checks_create_start(callback: CallbackQuery, state: FSMContext) -> Non
         panel_chat_id=callback.message.chat.id,
         panel_message_id=callback.message.message_id,
     )
-    await callback.message.edit_text(
+    await edit_any(callback.message, 
         '<tg-emoji emoji-id="6037175527846975726">➕</tg-emoji> <b>Создание чека</b>\n\n'
         "Выберите тип чека:",
         reply_markup=check_type_keyboard(),
@@ -1208,13 +1208,13 @@ async def checks_create_type(callback: CallbackQuery, state: FSMContext) -> None
     if check_type == "single":
         await state.update_data(max_activations=1)
         await state.set_state(CheckStates.create_amount)
-        await callback.message.edit_text(
+        await edit_any(callback.message, 
             '<tg-emoji emoji-id="6039614175917903752">✏</tg-emoji> <i>Введите сумму, которая будет зачисляться за активацию (например, 5):</i>',
             reply_markup=checks_cancel_keyboard(),
         )
     else:
         await state.set_state(CheckStates.create_count)
-        await callback.message.edit_text(
+        await edit_any(callback.message, 
             '<tg-emoji emoji-id="6039614175917903752">✏</tg-emoji> <i>Введите количество активаций (например, 10):</i>',
             reply_markup=checks_cancel_keyboard(),
         )
@@ -1336,7 +1336,7 @@ async def checks_create_restriction(callback: CallbackQuery, state: FSMContext) 
     await state.update_data(restriction_type=restriction_type)
     await state.set_state(CheckStates.create_restriction_value)
     label = CHECK_RESTRICTION_LABELS.get(restriction_type, "")
-    await callback.message.edit_text(
+    await edit_any(callback.message, 
         f"Введите минимальное значение для условия «{label}» (например, 50):",
         reply_markup=checks_cancel_keyboard(),
     )
@@ -1377,7 +1377,7 @@ async def checks_mine(callback: CallbackQuery) -> None:
         reverse=True,
     )[:10]
 
-    await callback.message.edit_text(
+    await edit_any(callback.message, 
         format_my_checks_text(user_id),
         reply_markup=my_checks_keyboard(my_codes) if my_codes else checks_menu_keyboard(),
     )
@@ -1414,7 +1414,7 @@ async def checks_deactivate(callback: CallbackQuery) -> None:
         reverse=True,
     )[:10]
 
-    await callback.message.edit_text(
+    await edit_any(callback.message, 
         format_my_checks_text(callback.from_user.id),
         reply_markup=my_checks_keyboard(my_codes) if my_codes else checks_menu_keyboard(),
     )
@@ -1424,6 +1424,39 @@ async def checks_deactivate(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("menu:"))
 async def menu_callback(callback: CallbackQuery) -> None:
     await callback.answer("В разработке 🚧", show_alert=True)
+
+
+# --------------------------------------------------------------------------
+# Картинка главного меню (/img — только админы)
+# --------------------------------------------------------------------------
+
+
+@router.message(Command("img"))
+async def cmd_img(message: Message, command: CommandObject) -> None:
+    """/img в ответ на фото — меню будет отправляться вместе с этим фото.
+    /img off — убрать картинку. Экраны меню редактируются через edit_any (edit_text / edit_caption)."""
+    if not is_admin(message.from_user.id):
+        await message.answer("🚫 Доступ запрещён.")
+        return
+
+    if (command.args or "").strip().lower() in ("off", "reset", "del", "delete"):
+        ui.set_menu_image(None)
+        await message.answer("🗑 Картинка меню удалена — меню снова текстовое.")
+        return
+
+    reply = message.reply_to_message
+    if reply is None or not reply.photo:
+        await message.answer(
+            "🖼 <b>Картинка меню</b>\n\n"
+            "Ответьте командой <code>/img</code> на изображение (отправленное как фото, "
+            "не файлом) — меню будет отправляться вместе с ним.\n"
+            "Убрать картинку: <code>/img off</code>"
+        )
+        return
+
+    ui.set_menu_image(reply.photo[-1].file_id)  # последнее фото в списке — максимального размера
+    await message.answer("✅ Картинка меню обновлена. Так теперь выглядит меню:")
+    await show_menu(message)
 
 
 # --------------------------------------------------------------------------
@@ -1462,7 +1495,7 @@ async def admin_back(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("🚫 Доступ запрещён.", show_alert=True)
         return
     await state.clear()
-    await callback.message.edit_text(
+    await edit_any(callback.message, 
         "⚙️ <b>Админ-панель</b>\n\nВыберите действие:",
         reply_markup=admin_panel_keyboard(),
     )
@@ -1475,7 +1508,7 @@ async def admin_cancel(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("🚫 Доступ запрещён.", show_alert=True)
         return
     await state.clear()
-    await callback.message.edit_text(
+    await edit_any(callback.message, 
         "⚙️ <b>Админ-панель</b>\n\nВыберите действие:",
         reply_markup=admin_panel_keyboard(),
     )
@@ -1487,7 +1520,7 @@ async def admin_stats(callback: CallbackQuery) -> None:
     if not is_admin(callback.from_user.id):
         await callback.answer("🚫 Доступ запрещён.", show_alert=True)
         return
-    await callback.message.edit_text(format_global_stats_text(), reply_markup=admin_back_keyboard())
+    await edit_any(callback.message, format_global_stats_text(), reply_markup=admin_back_keyboard())
     await callback.answer()
 
 
@@ -1500,7 +1533,7 @@ async def admin_grant_start(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("🚫 Доступ запрещён.", show_alert=True)
         return
     await state.set_state(AdminStates.grant_user_id)
-    await callback.message.edit_text(
+    await edit_any(callback.message, 
         "💰 <b>Выдача баланса</b>\n\nВведите ID пользователя, которому начислить баланс:",
         reply_markup=admin_cancel_keyboard(),
     )
@@ -1559,7 +1592,7 @@ async def admin_deduct_start(callback: CallbackQuery, state: FSMContext) -> None
         await callback.answer("🚫 Доступ запрещён.", show_alert=True)
         return
     await state.set_state(AdminStates.deduct_user_id)
-    await callback.message.edit_text(
+    await edit_any(callback.message, 
         "➖ <b>Списание баланса</b>\n\nВведите ID пользователя, у которого списать баланс:",
         reply_markup=admin_cancel_keyboard(),
     )
@@ -1618,7 +1651,7 @@ async def admin_find_start(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("🚫 Доступ запрещён.", show_alert=True)
         return
     await state.set_state(AdminStates.find_user_id)
-    await callback.message.edit_text(
+    await edit_any(callback.message, 
         "🔎 <b>Поиск пользователя</b>\n\nВведите ID пользователя:",
         reply_markup=admin_cancel_keyboard(),
     )
@@ -1659,7 +1692,7 @@ async def admin_broadcast_start(callback: CallbackQuery, state: FSMContext) -> N
         await callback.answer("🚫 Доступ запрещён.", show_alert=True)
         return
     await state.set_state(AdminStates.broadcast_text)
-    await callback.message.edit_text(
+    await edit_any(callback.message, 
         "📢 <b>Рассылка</b>\n\nОтправьте текст сообщения для рассылки всем пользователям:",
         reply_markup=admin_cancel_keyboard(),
     )
