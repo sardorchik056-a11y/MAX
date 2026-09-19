@@ -56,7 +56,7 @@ from storage import adjust_balance, get_profile_stats
 #
 # Пустая строка = провайдер отключён (кнопка покажет «временно недоступен»).
 CRYPTOBOT_TOKEN = "582363:AALEf7JOugnrQyrkMHzH5UrO7pdOjjYnTQy"   # <- вставьте API Token из @CryptoBot
-XROCKET_TOKEN = "034cea3212dcfe762c3dc3093"     # <- вставьте API Token из @xRocket
+XROCKET_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhcHBJZCI6IjMwMDgzMiIsImp0aSI6ImFwcDozMDA4MzI6N2ZkMTE5ODUtMzZhMy00YzY3LWE3YWQtYmUxYjBmYWY0YzU2IiwiaWF0IjoxNzg5ODAwOTg0fQ.hYCCWeXzF_Z5EPzPPIUZXGjQ4B-c4BMICd9hJGXHTHA"     # <- вставьте API Token из @xRocket
 
 CRYPTOBOT_TESTNET = False
 XROCKET_TESTNET = False
