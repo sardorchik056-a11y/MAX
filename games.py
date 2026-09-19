@@ -8,6 +8,8 @@ import re
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Tuple
 
+import bonus as bonus_module  # бонусный баланс (см. bonus.py)
+
 # ========== СОЗДАЁМ РОУТЕР СРАЗУ ПОСЛЕ ИМПОРТОВ ==========
 router = Router()
 
@@ -85,7 +87,19 @@ user_last_bet_time: Dict[int, datetime] = {}
 
 user_current_bet: Dict[int, float] = {}
 
+# Из какого баланса играет игрок: 'real' (по умолчанию) или 'bonus'.
+# 'bonus' включается командой «0.1 бонус», 'real' — командой «0.1$».
+# Независимо от режима, если реальный баланс меньше MIN_BET, ставка автоматически идёт с бонусного.
+BET_MODE_REAL = 'real'
+BET_MODE_BONUS = 'bonus'
+user_bet_mode: Dict[int, str] = {}
+
 SET_BET_PATTERN = re.compile(r'^\s*(\d+(?:[.,]\d+)?)\s*\$\s*$')
+# «0.1 бонус», «0,5 бонус», «1$ бонус», «2 bonus»
+SET_BONUS_BET_PATTERN = re.compile(r'^\s*(\d+(?:[.,]\d+)?)\s*\$?\s*(?:бонус\w*|bonus\w*)\s*$', re.IGNORECASE)
+# «/куб чет 0.1 бонус» — бонусная ставка только на этот раз (режим не меняется)
+TEXT_BONUS_SUFFIX = re.compile(r'\s(?:бонус\w*|bonus\w*)\s*$', re.IGNORECASE)
+BONUS_HOWTO = "Бонусная ставка: 0.1 бонус"
 
 def e(eid: str, fallback: str = "•") -> str:
     return f'<tg-emoji emoji-id="{eid}">{fallback}</tg-emoji>'
@@ -533,6 +547,9 @@ class BettingGame:
         self.bot = bot
         self.pending_bets = {}
         self.active_games = {}
+        # Из какого баланса списана ставка идущей сейчас игры: user_id -> 'real' | 'bonus'.
+        # Выигрыш и возврат ставки идут в тот же баланс. Очищается в end_game().
+        self.bet_source: Dict[int, str] = {}
         self.referral_system = None
         set_betting_game(self)
 
@@ -566,6 +583,63 @@ class BettingGame:
             return False
         stats["balance"] -= amount
         return True
+
+    # ---- источник ставки: реальный или бонусный баланс -------------------------------------
+
+    def get_bet_mode(self, user_id: int) -> str:
+        return user_bet_mode.get(user_id, BET_MODE_REAL)
+
+    def set_bet_mode(self, user_id: int, mode: str) -> None:
+        user_bet_mode[user_id] = mode
+
+    def preview_source(self, user_id: int) -> str:
+        """Из какого баланса пойдёт ставка прямо сейчас (для показа в меню)."""
+        if self.get_bet_mode(user_id) == BET_MODE_BONUS:
+            return BET_MODE_BONUS
+        if self.get_balance(user_id) < MIN_BET and bonus_module.get_summary(user_id)["balance"] > 0:
+            return BET_MODE_BONUS
+        return BET_MODE_REAL
+
+    def take_bet(self, user_id: int, amount: float, force_bonus: bool = False) -> Tuple[Optional[str], str]:
+        """Списывает ставку с подходящего баланса.
+
+        Бонусный баланс используется, если: игрок включил режим «бонус» (или force_bonus),
+        либо реальный баланс меньше MIN_BET (автоматически).
+        Возвращает ('real'|'bonus', '') при успехе или (None, причина) при отказе;
+        причина — обычный текст без HTML, годится и для alert, и для сообщения."""
+        manual_bonus = force_bonus or self.get_bet_mode(user_id) == BET_MODE_BONUS
+        real_balance = self.get_balance(user_id)
+
+        if manual_bonus or real_balance < MIN_BET:
+            if bonus_module.try_spend(user_id, amount):
+                self.bet_source[user_id] = BET_MODE_BONUS
+                return BET_MODE_BONUS, ""
+            bonus_balance = bonus_module.get_summary(user_id)["balance"]
+            if manual_bonus:
+                if bonus_balance <= 0:
+                    return None, "Бонусного баланса нет.\nЧтобы играть на реальный баланс, отправьте: 0.1$"
+                return None, (
+                    f"Недостаточно бонусных средств! Бонусный баланс: {bonus_balance:.2f}$\n"
+                    "Чтобы играть на реальный баланс, отправьте: 0.1$"
+                )
+            # авто-режим не сработал (бонуса нет или не хватает) — падаем в обычную проверку ниже
+
+        if real_balance >= amount and self.subtract_balance(user_id, amount):
+            self.bet_source[user_id] = BET_MODE_REAL
+            return BET_MODE_REAL, ""
+
+        reason = f"Недостаточно средств! Ваш баланс: {real_balance:.2f}$"
+        bonus_balance = bonus_module.get_summary(user_id)["balance"]
+        if bonus_balance > 0:
+            reason += f"\nБонусный баланс: {bonus_balance:.2f}$"
+        return None, reason
+
+    def refund_bet(self, user_id: int, amount: float) -> None:
+        """Возвращает ставку туда, откуда она была списана (игра не состоялась)."""
+        if self.bet_source.get(user_id) == BET_MODE_BONUS:
+            bonus_module.refund(user_id, amount)
+        else:
+            self.add_balance(user_id, amount)
 
     def get_bet_config(self, bet_type: str):
         if bet_type.startswith('куб_'):
@@ -604,6 +678,7 @@ class BettingGame:
     def end_game(self, user_id: int):
         if user_id in self.active_games:
             del self.active_games[user_id]
+        self.bet_source.pop(user_id, None)
 
 
 def check_rate_limit(user_id: int) -> Tuple[bool, float]:
@@ -671,6 +746,12 @@ def is_set_bet_command(text: str) -> bool:
     return bool(SET_BET_PATTERN.match(text.strip()))
 
 
+def is_set_bonus_bet_command(text: str) -> bool:
+    if not text:
+        return False
+    return bool(SET_BONUS_BET_PATTERN.match(text.strip()))
+
+
 async def handle_set_bet_command(message: Message, betting_game: 'BettingGame'):
     user_id = message.from_user.id
     match = SET_BET_PATTERN.match((message.text or '').strip())
@@ -692,9 +773,60 @@ async def handle_set_bet_command(message: Message, betting_game: 'BettingGame'):
         return
 
     betting_game.set_current_bet(user_id, amount)
+    betting_game.set_bet_mode(user_id, BET_MODE_REAL)
+    hint = ""
+    if bonus_module.get_summary(user_id)["active"]:
+        hint = f"\n<blockquote><i>{BONUS_HOWTO}</i></blockquote>"
     await message.answer(
         f"<blockquote><b>✅ Ставка установлена: <code>{amount:.2f}</code>$</b></blockquote>\n\n"
-        f"<blockquote><i>Действует для Кубика, Футбола, Баскетбола, Дартса и Боулинга.</i></blockquote>",
+        f"<blockquote><i>Действует для Кубика, Футбола, Баскетбола, Дартса и Боулинга.</i></blockquote>"
+        f"{hint}",
+        parse_mode='HTML'
+    )
+
+
+async def handle_set_bonus_bet_command(message: Message, betting_game: 'BettingGame'):
+    """«0.1 бонус» — устанавливает ставку и переключает игру на бонусный баланс."""
+    user_id = message.from_user.id
+    match = SET_BONUS_BET_PATTERN.match((message.text or '').strip())
+    if not match:
+        return
+
+    try:
+        amount = float(match.group(1).replace(',', '.'))
+    except ValueError:
+        await message.answer(f"{e(EMOJI_CROSS,'❌')} Введите корректную сумму, например: 0.1 бонус")
+        return
+
+    if amount < MIN_BET:
+        await message.answer(f"{e(EMOJI_CROSS,'❌')} Минимальная ставка: {MIN_BET}$")
+        return
+    if amount > MAX_BET:
+        await message.answer(f"{e(EMOJI_CROSS,'❌')} Максимальная ставка: {MAX_BET}$")
+        return
+
+    summary = bonus_module.get_summary(user_id)
+    if not summary["active"]:
+        await message.answer(
+            f"<blockquote><b>{e(EMOJI_CROSS,'❌')} У вас нет бонусного баланса.</b></blockquote>\n\n"
+            f"<blockquote><i>Для игры на реальный баланс отправьте, например: 0.1$</i></blockquote>",
+            parse_mode='HTML'
+        )
+        return
+
+    betting_game.set_current_bet(user_id, amount)
+    betting_game.set_bet_mode(user_id, BET_MODE_BONUS)
+    warning = ""
+    if summary["balance"] < amount - 1e-9:
+        warning = (
+            f"\n<blockquote><b>{e(EMOJI_CROSS,'❌')} Бонусного баланса "
+            f"(<code>{summary['balance']:.2f}</code>$) не хватает на такую ставку.</b></blockquote>"
+        )
+    await message.answer(
+        f"<blockquote><b>✅ Бонусная ставка установлена: <code>{amount:.2f}</code>{bonus_module.BONUS_ICON}</b></blockquote>\n\n"
+        f"<blockquote><i>Игры идут с бонусного баланса (<code>{summary['balance']:.2f}</code>$). "
+        f"Вернуться к реальному балансу: отправьте, например, 0.1$</i></blockquote>"
+        f"{warning}",
         parse_mode='HTML'
     )
 
@@ -740,6 +872,19 @@ def _apply_game_result(
     game_name = _get_game_display_name(bet_type)
     from storage import log_game_round  # для топа игроков (оборот/выигрыши/кол-во игр)
 
+    if betting_game.bet_source.get(user_id) == BET_MODE_BONUS:
+        # Бонусный раунд: выигрыш падает на БОНУСНЫЙ баланс, ставка идёт в отыгрыш. В топ и оборот
+        # такие раунды не попадают (record_game_result / log_game_round не вызываем).
+        winnings = round(amount * bet_config['multiplier'] * (1 - WIN_COMMISSION_RATE), 2) if is_win else 0.0
+        event = bonus_module.settle(user_id, amount, winnings)
+        bonus_module.notify_event(user_id, event)
+        logging.info(
+            f"[game] user={user_id} game={game_name} BONUS {'WIN' if is_win else 'LOSE'} "
+            f"bet={amount} net={winnings:.2f}"
+            + (f" -> wallet {event['kind']}" if event else "")
+        )
+        return winnings
+
     if is_win:
         gross_winnings = amount * bet_config['multiplier']
         winnings = round(gross_winnings * (1 - WIN_COMMISSION_RATE), 2)
@@ -758,24 +903,37 @@ def _apply_game_result(
         return 0.0
 
 
+def _round_is_bonus(user_id: int) -> bool:
+    """Идёт ли сейчас раунд игрока на бонусном балансе (источник запоминается в take_bet)."""
+    bg = get_betting_game()
+    return bool(bg and bg.bet_source.get(user_id) == BET_MODE_BONUS)
+
+
+def _coin_icon(user_id: int) -> str:
+    return bonus_module.BONUS_ICON if _round_is_bonus(user_id) else e(EMOJI_COIN, '💲')
+
+
 def _build_win_text(nickname: str, user_id: int, amount: float, outcome_label: str, winnings: float) -> str:
+    coin = _coin_icon(user_id)
+    target = "бонусный баланс" if _round_is_bonus(user_id) else "баланс"
     return (
         f"<b>Игрок {nickname} (ID: <code>{user_id}</code>) выигрывает"
         f"<tg-emoji emoji-id=\"5461151367559141950\">🎉</tg-emoji></b>\n\n"
-        f"<blockquote>Ставка: <code>{amount:.2f}</code>{e(EMOJI_COIN,'💲')} на «<b>{outcome_label}</b>»</blockquote>\n"
+        f"<blockquote>Ставка: <code>{amount:.2f}</code>{coin} на «<b>{outcome_label}</b>»</blockquote>\n"
         f"<blockquote><code>{winnings:.2f}</code>"
-        f"{e(EMOJI_COIN,'💲')} "
-        f"Успешно зачислены на баланс!</blockquote>\n"
+        f"{coin} "
+        f"Успешно зачислены на {target}!</blockquote>\n"
         f"<blockquote><tg-emoji emoji-id=\"5461151367559141950\">🎉</tg-emoji>"
         f"Поздравляем!</blockquote>"
     )
 
 
 def _build_lose_text(nickname: str, user_id: int, amount: float, outcome_label: str) -> str:
+    coin = _coin_icon(user_id)
     return (
         f"<b>Игрок {nickname} (ID: <code>{user_id}</code>) проигрывает"
         f"<tg-emoji emoji-id=\"5422858869372104873\">❌</tg-emoji></b>\n\n"
-        f"<blockquote>Ставка: <code>{amount:.2f}</code>{e(EMOJI_COIN,'💲')} на «<b>{outcome_label}</b>» — не сыграла.</blockquote>\n"
+        f"<blockquote>Ставка: <code>{amount:.2f}</code>{coin} на «<b>{outcome_label}</b>» — не сыграла.</blockquote>\n"
         f"<blockquote><b><i>Это не повод сдаваться! "
         f"Пробуй снова и снова до победного!</i></b></blockquote>\n"
         f"<blockquote><tg-emoji emoji-id=\"5305699699204837855\">🎉</tg-emoji>"
@@ -1256,7 +1414,7 @@ async def _run_game(
     emoji = _bet_emoji_for(bet_type)
 
     bet_text = (
-        f"{emoji} <b>{nickname}</b> ставит <code>{amount:.2f}</code>{e(EMOJI_COIN,'💲')} "
+        f"{emoji} <b>{nickname}</b> ставит <code>{amount:.2f}</code>{_coin_icon(user_id)} "
         f"(x{_fmt_mult(mult)}) на «<b>{outcome_label}</b>»"
     )
     bet_msg = await betting_game.bot.send_message(chat_id, bet_text, parse_mode='HTML')
@@ -1295,7 +1453,7 @@ async def _execute_and_settle(
         await _run_game(chat_id, user_id, nickname, amount, bet_type, bet_config, betting_game, callback=callback)
     except Exception as ex:
         logging.error(f"Ошибка при отправке кубика (до броска): {ex}")
-        betting_game.add_balance(user_id, amount)
+        betting_game.refund_bet(user_id, amount)
         try:
             if notify_target is not None:
                 await notify_target.answer("❌ Не удалось начать игру. Средства возвращены.")
@@ -1375,16 +1533,13 @@ async def handle_replay_bet(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Некорректная сумма ставки", show_alert=True)
         return
 
-    balance = betting_game.get_balance(user_id)
-    if balance < amount:
-        await callback.answer(f"❌ Недостаточно средств! Ваш баланс: {balance:.2f}$", show_alert=True)
+    source, reason = betting_game.take_bet(user_id, amount)
+    if source is None:
+        await callback.answer(f"❌ {reason}", show_alert=True)
         return
 
-    if not betting_game.subtract_balance(user_id, amount):
-        await callback.answer("❌ Ошибка при снятии средств", show_alert=True)
-        return
-
-    asyncio.create_task(notify_referrer_commission(user_id, amount))
+    if source == BET_MODE_REAL:  # с бонусных ставок реферальная комиссия не платится
+        asyncio.create_task(notify_referrer_commission(user_id, amount))
 
     nickname = _build_nickname(callback.from_user)
     betting_game.start_game(user_id)
@@ -1465,24 +1620,23 @@ async def handle_text_bet_command(message: Message, betting_game: BettingGame):
 
     bet_type, amount = parsed
 
-    balance = betting_game.get_balance(user_id)
-    if balance < amount:
-        await message.answer(
-            f"<blockquote><b>{e(EMOJI_CROSS,'❌')} Недостаточно средств!</b></blockquote>\n\n",
-            parse_mode='HTML'
-        )
-        return
-
     bet_config = betting_game.get_bet_config(bet_type)
     if not bet_config:
         await message.answer("❌ Ошибка конфигурации ставки")
         return
 
-    if not betting_game.subtract_balance(user_id, amount):
-        await message.answer("❌ Ошибка при снятии средств")
+    # «/куб чет 0.1 бонус» — эта ставка на бонусный баланс, режим при этом не меняется
+    force_bonus = bool(TEXT_BONUS_SUFFIX.search(message.text or ''))
+    source, reason = betting_game.take_bet(user_id, amount, force_bonus=force_bonus)
+    if source is None:
+        await message.answer(
+            f"<blockquote><b>{e(EMOJI_CROSS,'❌')} {reason}</b></blockquote>\n\n",
+            parse_mode='HTML'
+        )
         return
 
-    asyncio.create_task(notify_referrer_commission(user_id, amount))
+    if source == BET_MODE_REAL:  # с бонусных ставок реферальная комиссия не платится
+        asyncio.create_task(notify_referrer_commission(user_id, amount))
 
     nickname = _build_nickname(message.from_user)
 
@@ -1570,10 +1724,19 @@ def _bet_balance_block(betting_game: 'BettingGame', user_id: int) -> str:
     current_bet = betting_game.get_current_bet(user_id)
     bet_display = f"{current_bet:.2f}" if current_bet else "0"
     balance = betting_game.get_balance(user_id)
-    return (
-        f"<blockquote>{e(EMOJI_BET_LABEL,'🪙')} Ставка: <code>{bet_display}</code>{e(EMOJI_COIN,'💲')}\n"
-        f"{e(EMOJI_BALANCE_LABEL,'👛')} Баланс: <code>{balance:.2f}</code>{e(EMOJI_COIN,'💲')}</blockquote>\n\n"
-    )
+    bonus = bonus_module.get_summary(user_id)
+    on_bonus = betting_game.preview_source(user_id) == BET_MODE_BONUS
+    bet_icon = f"{bonus_module.BONUS_ICON} (бонус)" if on_bonus else e(EMOJI_COIN, '💲')
+    lines = [
+        f"{e(EMOJI_BET_LABEL,'🪙')} Ставка: <code>{bet_display}</code>{bet_icon}",
+        f"{e(EMOJI_BALANCE_LABEL,'👛')} Баланс: <code>{balance:.2f}</code>{e(EMOJI_COIN,'💲')}",
+    ]
+    if bonus["active"]:
+        lines.append(
+            f"{bonus_module.BONUS_ICON} Бонус: <code>{bonus['balance']:.2f}</code> "
+            f"· осталось отыграть: <code>{bonus['remaining']:.2f}</code>"
+        )
+    return "<blockquote>" + "\n".join(lines) + "</blockquote>\n\n"
 
 
 def build_games_selector_text(betting_game: 'BettingGame', user_id: int) -> str:
@@ -2122,24 +2285,21 @@ async def request_amount(callback: CallbackQuery, state: FSMContext, betting_gam
     amount = betting_game.get_current_bet(user_id)
     if amount is None:
         await callback.answer(
-            "❌ Ставка не установлена!\nОтправьте сумму в чат, например: 0.1$",
+            "❌ Ставка не установлена!\n"
+            "Отправьте сумму в чат:\n"
+            "• реальная ставка: 0.1$\n"
+            "• бонусная ставка: 0.1 бонус",
             show_alert=True
         )
         return
 
-    balance = betting_game.get_balance(user_id)
-    if balance < amount:
-        await callback.answer(
-            f"❌ Недостаточно средств! Ваш баланс: {balance:.2f}$",
-            show_alert=True
-        )
+    source, reason = betting_game.take_bet(user_id, amount)
+    if source is None:
+        await callback.answer(f"❌ {reason}", show_alert=True)
         return
 
-    if not betting_game.subtract_balance(user_id, amount):
-        await callback.answer("❌ Ошибка при снятии средств", show_alert=True)
-        return
-
-    asyncio.create_task(notify_referrer_commission(user_id, amount))
+    if source == BET_MODE_REAL:  # с бонусных ставок реферальная комиссия не платится
+        asyncio.create_task(notify_referrer_commission(user_id, amount))
 
     nickname = _build_nickname(callback.from_user)
     notify_target = callback.message
@@ -2175,17 +2335,6 @@ async def process_bet_amount(message: Message, state: FSMContext, betting_game: 
             await message.answer(f"{e(EMOJI_CROSS,'❌')} Максимальная ставка: {MAX_BET}")
             return
 
-        balance = betting_game.get_balance(user_id)
-        if balance < amount:
-            await message.answer(
-                f"<blockquote><b>{e(EMOJI_CROSS,'❌')} Недостаточно средств!</b></blockquote>\n\n",
-                parse_mode='HTML'
-            )
-            if user_id in betting_game.pending_bets:
-                del betting_game.pending_bets[user_id]
-            await state.clear()
-            return
-
         bet_type   = betting_game.pending_bets[user_id]
         bet_config = betting_game.get_bet_config(bet_type)
         if not bet_config:
@@ -2195,14 +2344,19 @@ async def process_bet_amount(message: Message, state: FSMContext, betting_game: 
             await state.clear()
             return
 
-        if not betting_game.subtract_balance(user_id, amount):
-            await message.answer("❌ Ошибка при снятии средств")
+        source, reason = betting_game.take_bet(user_id, amount)
+        if source is None:
+            await message.answer(
+                f"<blockquote><b>{e(EMOJI_CROSS,'❌')} {reason}</b></blockquote>\n\n",
+                parse_mode='HTML'
+            )
             if user_id in betting_game.pending_bets:
                 del betting_game.pending_bets[user_id]
             await state.clear()
             return
 
-        asyncio.create_task(notify_referrer_commission(user_id, amount))
+        if source == BET_MODE_REAL:  # с бонусных ставок реферальная комиссия не платится
+            asyncio.create_task(notify_referrer_commission(user_id, amount))
 
         nickname = _build_nickname(message.from_user)
 
@@ -2311,6 +2465,10 @@ async def games_text_router(message: Message, state: FSMContext) -> None:
 
     if is_set_bet_command(text):
         await handle_set_bet_command(message, betting_game)
+        return
+
+    if is_set_bonus_bet_command(text):
+        await handle_set_bonus_bet_command(message, betting_game)
         return
 
     if is_game_menu_command(text):
