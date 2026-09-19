@@ -993,8 +993,9 @@ async def profile_section(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data == "profile:deposit")
-async def profile_deposit(callback: CallbackQuery) -> None:
-    await callback.answer(IN_DEV_TEXT, show_alert=True)
+async def profile_deposit(callback: CallbackQuery, state: FSMContext) -> None:
+    remember_user(callback.from_user)
+    await payments_module.show_deposit_methods(callback, state)
 
 
 @router.callback_query(F.data == "profile:withdraw")
@@ -1127,6 +1128,12 @@ async def edit_panel(
 import games as games_module
 
 games_router = games_module.router
+
+# Пополнение баланса через CryptoBot / xRocket (см. payments.py). Импорт безопасен для
+# циклов: payments.py зависит только от storage.py, а не от main.py.
+import payments as payments_module
+
+payments_router = payments_module.router
 
 
 @router.callback_query(F.data == "games")
@@ -1688,6 +1695,9 @@ async def main() -> None:
     )
     dp = Dispatcher()
     dp.include_router(router)
+    # ВАЖНО: payments_router — до games_router. У games_router есть «ловец» любого текста
+    # (games_text_router), и он перехватил бы сумму пополнения, введённую в чат.
+    dp.include_router(payments_router)
     dp.include_router(games_router)
 
     # Создаёт единственный экземпляр BettingGame и регистрирует его как
@@ -1699,8 +1709,14 @@ async def main() -> None:
     me = await bot.get_me()
     BOT_USERNAME = me.username
 
+    # Фоновая проверка оплаты счетов CryptoBot / xRocket
+    payments_module.start_watchers(bot)
+
     await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await payments_module.stop_watchers()
 
 
 if __name__ == "__main__":
