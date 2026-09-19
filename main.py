@@ -999,8 +999,9 @@ async def profile_deposit(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.callback_query(F.data == "profile:withdraw")
-async def profile_withdraw(callback: CallbackQuery) -> None:
-    await callback.answer(IN_DEV_TEXT, show_alert=True)
+async def profile_withdraw(callback: CallbackQuery, state: FSMContext) -> None:
+    remember_user(callback.from_user)
+    await payments_module.show_withdraw_methods(callback, state)
 
 
 @router.callback_query(F.data == "menu:stats")
@@ -1134,6 +1135,8 @@ games_router = games_module.router
 import payments as payments_module
 
 payments_router = payments_module.router
+# Кому payments.py шлёт уведомления о сбоях выводов
+payments_module.ALERT_ADMIN_IDS = set(ADMIN_IDS)
 
 
 @router.callback_query(F.data == "games")
