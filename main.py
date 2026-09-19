@@ -943,6 +943,9 @@ async def cmd_start_deep_link(message: Message, command: CommandObject, state: F
             )
         else:
             result_line = f"❌ {msg}\n\n"
+    elif payload.startswith("ref_"):
+        if await refs_module.bind_from_payload(message.bot, message.from_user, payload):
+            result_line = "🤝 Вы присоединились по приглашению партнёра!\n\n"
 
     await message.answer(
         f"{result_line}Привет, {message.from_user.full_name}! 👋\n\n"
@@ -979,7 +982,7 @@ async def show_menu(message: Message) -> None:
 @router.message(F.text == "Партнеры")
 async def partners_section(message: Message) -> None:
     remember_user(message.from_user)
-    await message.answer(IN_DEV_TEXT)
+    await refs_module.show_partners(message)
 
 
 @router.callback_query(F.data == "menu:profile")
@@ -1137,6 +1140,13 @@ import payments as payments_module
 payments_router = payments_module.router
 # Кому payments.py шлёт уведомления о сбоях выводов
 payments_module.ALERT_ADMIN_IDS = set(ADMIN_IDS)
+
+# Партнёрская программа (см. refs.py): 2% пригласившему с каждого пополнения реферала.
+# refs.py зависит только от storage.py (и лениво от payments.py), поэтому циклов нет.
+import refs as refs_module
+
+refs_router = refs_module.router
+refs_module.ALERT_ADMIN_IDS = set(ADMIN_IDS)
 
 
 @router.callback_query(F.data == "games")
@@ -1701,6 +1711,7 @@ async def main() -> None:
     # ВАЖНО: payments_router — до games_router. У games_router есть «ловец» любого текста
     # (games_text_router), и он перехватил бы сумму пополнения, введённую в чат.
     dp.include_router(payments_router)
+    dp.include_router(refs_router)
     dp.include_router(games_router)
 
     # Создаёт единственный экземпляр BettingGame и регистрирует его как
