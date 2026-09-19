@@ -1160,6 +1160,7 @@ async def games_section(message: Message) -> None:
 # регистрируем функцию здесь, как уже сделано для betting_game через
 # set_betting_game/get_betting_game.
 games_module.set_games_callback(games_callback)
+games_module.set_remember_user(remember_user)
 
 
 # --- Создание чека ---
