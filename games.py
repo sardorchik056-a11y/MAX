@@ -45,6 +45,18 @@ def set_games_callback(cb):
 def get_games_callback():
     return _games_callback
 
+
+# main.py регистрирует здесь свою remember_user (ник/юзернейм для топа) — по той же
+# схеме, что и games_callback выше, без `from main import ...`. Нужна, чтобы игрок,
+# который играет по «старой» кнопке (например, после перезапуска бота, когда /start
+# он ещё не нажимал), всё равно попадал в топ под своим именем, а не как «Игрок 123».
+_remember_user = None
+
+
+def set_remember_user(fn):
+    global _remember_user
+    _remember_user = fn
+
 try:
     from database import save_game_result as db_save_game_result, update_balance as db_update_balance
 except ImportError:
@@ -1294,6 +1306,12 @@ async def _execute_and_settle(
 
 
 def _build_nickname(user) -> str:
+    # вызывается при каждой ставке -> запоминаем имя игрока для топа
+    if _remember_user is not None:
+        try:
+            _remember_user(user)
+        except Exception as ex:
+            logging.warning(f"[remember_user] не удалось запомнить пользователя: {ex}")
     nickname = user.first_name or ""
     if user.last_name:
         nickname += f" {user.last_name}"
