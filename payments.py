@@ -22,7 +22,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
 import sqlite3
 import time
@@ -45,8 +44,8 @@ from storage import adjust_balance, get_profile_stats
 # Настройки
 # --------------------------------------------------------------------------
 
-# Токены. Лучше через переменные окружения (CRYPTOBOT_TOKEN / XROCKET_TOKEN),
-# но можно и вписать прямо сюда. НЕ коммитьте токены в git.
+# Токены платёжек — вписываются прямо сюда, между кавычками (как BOT_TOKEN в main.py).
+# НЕ коммитьте файл с настоящими токенами в git.
 #
 #   CryptoBot: @CryptoBot -> Crypto Pay -> Create App -> API Token
 #              (тестовая сеть: @CryptoTestnetBot)
@@ -54,8 +53,10 @@ from storage import adjust_balance, get_profile_stats
 #              -> «API Token» (это Bearer-токен нового Pay API; старый ключ
 #              Rocket-Pay-Key от Legacy API сюда НЕ подходит).
 #              (тестовая сеть: @xrocket_testnet_bot)
-CRYPTOBOT_TOKEN = os.getenv("CRYPTOBOT_TOKEN", "")
-XROCKET_TOKEN = os.getenv("XROCKET_TOKEN", "")
+#
+# Пустая строка = провайдер отключён (кнопка покажет «временно недоступен»).
+CRYPTOBOT_TOKEN = "582363:AALEf7JOugnrQyrkMHzH5UrO7pdOjjYnTQy"   # <- вставьте API Token из @CryptoBot
+XROCKET_TOKEN = "034cea3212dcfe762c3dc3093"     # <- вставьте API Token из @xRocket
 
 CRYPTOBOT_TESTNET = False
 XROCKET_TESTNET = False
