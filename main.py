@@ -1014,6 +1014,19 @@ async def cmd_start_deep_link(message: Message, command: CommandObject, state: F
         # Деплинк (например, чек) применится после подтверждения подписки — см. subscription.py.
         await state.update_data(pending_start_payload=payload)
         text, markup = subscription_module.format_required_screen(missing)
+
+        # Если пришли по ссылке бонусного чека — покажем это прямо в экране подписки
+        # (единым сообщением), чтобы человек понимал, за чем именно подписывается.
+        # Сам чек активируется, как и раньше, только после подтверждения подписки —
+        # см. send_start_welcome() / pending_start_payload.
+        if payload.startswith("bcheck_"):
+            text = (
+                f"{bonus_module.BONUS_ICON} <b>Вас ждёт бонусный чек!</b>\n"
+                "<i>Подпишитесь на канал(ы) ниже и нажмите «Я подписался» — "
+                "чек активируется автоматически.</i>\n\n"
+                + text
+            )
+
         await message.answer(text, reply_markup=markup)
         return
 
