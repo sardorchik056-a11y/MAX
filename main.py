@@ -1,9 +1,12 @@
 import asyncio
 import logging
+import os
 import random
+import secrets
 import string
 from datetime import datetime, timedelta, timezone
 
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -18,17 +21,39 @@ from aiogram.types import (
     Message,
     ReplyKeyboardMarkup,
 )
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 # --------------------------------------------------------------------------
 # Конфигурация
 # --------------------------------------------------------------------------
 
-# Вставьте сюда токен вашего бота, полученный у @BotFather
-BOT_TOKEN = "8841055640:AAE65cYHaE9XVEo2fQLwZ5kPxrR1Fncqm5Q"
+# Токен бота — задаётся переменной окружения BOT_TOKEN (Render: Settings → Environment).
+# В коде токен больше не хранится — не коммитьте его в репозиторий.
+BOT_TOKEN = os.environ["BOT_TOKEN"]
 
 # ID администраторов бота (Telegram user_id). Узнать свой ID можно, например,
 # у @userinfobot. Добавьте сюда ID всех, кому нужен доступ к админ-панели.
 ADMIN_IDS: set[int] = {8118184388}
+
+# --------------------------------------------------------------------------
+# Вебхук / Render
+# --------------------------------------------------------------------------
+# Render сам прокидывает публичный URL сервиса в RENDER_EXTERNAL_URL и порт,
+# на котором нужно слушать, в PORT — руками их задавать не нужно.
+# WEBHOOK_SECRET — случайная часть пути + заголовок X-Telegram-Bot-Api-Secret-Token,
+# чтобы на вебхук нельзя было прислать апдейт, подделав запрос напрямую на /webhook.
+# Можно один раз сгенерировать и зафиксировать значением в env (WEBHOOK_SECRET),
+# иначе при каждом деплое сгенерируется новое и Telegram-вебхук будет переустановлен.
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET") or secrets.token_urlsafe(32)
+WEBHOOK_PATH = f"/webhook/{WEBHOOK_SECRET}"
+
+WEBHOOK_HOST = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("WEBHOOK_HOST")
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}" if WEBHOOK_HOST else None
+
+WEB_SERVER_HOST = "0.0.0.0"
+WEB_SERVER_PORT = int(os.environ.get("PORT", 10000))
+
+
 
 
 def is_admin(user_id: int) -> bool:
@@ -1861,7 +1886,46 @@ async def admin_broadcast_send(message: Message, state: FSMContext, bot: Bot) ->
 # --------------------------------------------------------------------------
 
 
-async def main() -> None:
+async def on_startup(bot: Bot) -> None:
+    """Всё, что раньше выполнялось перед start_polling — теперь выполняется
+    перед поднятием веб-сервера и регистрацией вебхука в Telegram."""
+    # Создаёт единственный экземпляр BettingGame и регистрирует его как
+    # общий для games.py (через set_betting_game внутри __init__), чтобы все
+    # хендлеры раздела «Игры» могли получить его через get_betting_game().
+    games_module.BettingGame(bot)
+    bonus_module.set_bot(bot)  # уведомления «бонус отыгран»
+
+    global BOT_USERNAME
+    me = await bot.get_me()
+    BOT_USERNAME = me.username
+
+    # Фоновая проверка оплаты счетов CryptoBot / xRocket
+    payments_module.start_watchers(bot)
+
+    if not WEBHOOK_URL:
+        raise RuntimeError(
+            "Не задан внешний адрес сервиса: нет ни RENDER_EXTERNAL_URL (Render выставляет "
+            "его сам для web-сервисов), ни WEBHOOK_HOST в переменных окружения."
+        )
+    await bot.set_webhook(
+        WEBHOOK_URL,
+        secret_token=WEBHOOK_SECRET,
+        drop_pending_updates=True,
+    )
+    logging.info("Вебхук установлен: %s", WEBHOOK_URL)
+
+
+async def on_shutdown(bot: Bot) -> None:
+    await payments_module.stop_watchers()
+    await bot.delete_webhook()
+
+
+async def health_check(request: web.Request) -> web.Response:
+    """Для Render Health Check (и просто чтобы GET / не 404-ил при открытии в браузере)."""
+    return web.Response(text="ok")
+
+
+def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
     bot = Bot(
@@ -1889,25 +1953,18 @@ async def main() -> None:
     dp.message.outer_middleware(subscription_module.SubscriptionMiddleware())
     dp.callback_query.outer_middleware(subscription_module.SubscriptionMiddleware())
 
-    # Создаёт единственный экземпляр BettingGame и регистрирует его как
-    # общий для games.py (через set_betting_game внутри __init__), чтобы все
-    # хендлеры раздела «Игры» могли получить его через get_betting_game().
-    games_module.BettingGame(bot)
-    bonus_module.set_bot(bot)  # уведомления «бонус отыгран»
+    dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
 
-    global BOT_USERNAME
-    me = await bot.get_me()
-    BOT_USERNAME = me.username
+    app = web.Application()
+    app.router.add_get("/", health_check)
+    SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(
+        app, path=WEBHOOK_PATH
+    )
+    setup_application(app, dp, bot=bot)
 
-    # Фоновая проверка оплаты счетов CryptoBot / xRocket
-    payments_module.start_watchers(bot)
-
-    await bot.delete_webhook(drop_pending_updates=True)
-    try:
-        await dp.start_polling(bot)
-    finally:
-        await payments_module.stop_watchers()
+    web.run_app(app, host=WEB_SERVER_HOST, port=WEB_SERVER_PORT)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
