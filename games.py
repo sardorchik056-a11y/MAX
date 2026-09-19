@@ -714,6 +714,17 @@ async def play_single_dice_game(
     dice_value = dice_message.dice.value
 
     is_win = dice_value in bet_config.get('values', [])
+    # ВРЕМЕННЫЙ диагностический лог — помогает сверить реальное значение,
+    # которое присылает Telegram для 🏀/⚽/🎯 и т.п., с тем, что мы ожидаем
+    # в values у bet_type. Telegram официально не документирует, какая именно
+    # анимация соответствует каждому конкретному числу (кроме того, что 4-5
+    # у 🏀/⚽ — это гол, а 1-3 — мимо), поэтому при подозрении на
+    # неправильный маппинг ("выпал отскок, а не засчиталось") нужно смотреть
+    # именно сюда: что реально было в dice_value в момент броска.
+    logging.info(
+        f"[dice_debug] emoji={emoji} bet_type={bet_type} dice_value={dice_value} "
+        f"expected_values={bet_config.get('values', [])} is_win={is_win}"
+    )
     winnings = _apply_game_result(
         user_id, nickname, amount, is_win, bet_config, betting_game, bet_type=bet_type
     )
