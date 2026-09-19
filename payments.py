@@ -1006,6 +1006,61 @@ async def stop_watchers() -> None:
 router = Router()
 
 
+# --------------------------------------------------------------------------
+# Казна / резерв — команды «казна», «kazna», «резерв», «reserve» (со слешем
+# и без) показывают админу сводку по остаткам на провайдерах. Ни CryptoBot,
+# ни xRocket здесь не спрашиваются "вживую" про баланс приложения — цифры
+# ниже админ обновляет руками по факту (см. TREASURY_* константы).
+# --------------------------------------------------------------------------
+
+# CryptoBot: общий остаток в долларах и доля в USDT — остальное поровну
+# считается как TRX/TON (Gram).
+TREASURY_CRYPTOBOT_TOTAL_USD = 3567.56
+TREASURY_CRYPTOBOT_USDT_SHARE = 0.47  # 47% в USDT, остаток пополам TRX/TON
+
+# xRocket: общий остаток в долларах + отдельно остаток в TON (Gram) —
+# без привязки к курсу, просто как есть в приложении.
+TREASURY_XROCKET_TOTAL_USD = 5436.76
+TREASURY_XROCKET_TON_AMOUNT = 2553
+
+TREASURY_TRIGGERS = ("казна", "kazna", "резерв", "reserve")
+_TREASURY_RE = re.compile(
+    r"^/?(?:" + "|".join(re.escape(t) for t in TREASURY_TRIGGERS) + r")(?:@\w+)?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _treasury_text() -> str:
+    cb_total = TREASURY_CRYPTOBOT_TOTAL_USD
+    cb_usdt = cb_total * TREASURY_CRYPTOBOT_USDT_SHARE
+    cb_rest = cb_total - cb_usdt
+    cb_trx = cb_rest / 2
+    cb_ton = cb_rest - cb_trx
+
+    xr_total = TREASURY_XROCKET_TOTAL_USD
+    grand_total = cb_total + xr_total
+
+    return (
+        "🏦 <b>Баланс казны</b>\n\n"
+        f"{_provider_label(cryptobot)} — <b>{_fmt_usd(cb_total)}</b>\n"
+        f"┌ USDT ({TREASURY_CRYPTOBOT_USDT_SHARE * 100:.0f}%): <b>{_fmt_usd(cb_usdt)}</b>\n"
+        f"├ TRX: <b>{_fmt_usd(cb_trx)}</b>\n"
+        f"└ TON (Gram): <b>{_fmt_usd(cb_ton)}</b>\n\n"
+        f"{_provider_label(xrocket)} — <b>{_fmt_usd(xr_total)}</b>\n"
+        f"└ TON (Gram): <b>{TREASURY_XROCKET_TON_AMOUNT:,}</b>\n\n"
+        f"💰 <b>Итого:</b> {_fmt_usd(grand_total)}"
+    )
+
+
+@router.message(F.text.regexp(_TREASURY_RE))
+async def treasury_command(message: Message) -> None:
+    # Баланс казны — не для игроков: тихо игнорируем не-админов (без ответа),
+    # чтобы не палить сам факт существования команды.
+    if message.from_user.id not in ALERT_ADMIN_IDS:
+        return
+    await message.answer(_treasury_text())
+
+
 class DepositStates(StatesGroup):
     waiting_amount = State()
 
