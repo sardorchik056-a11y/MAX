@@ -79,7 +79,7 @@ def e(eid: str, fallback: str = "•") -> str:
     return f'<tg-emoji emoji-id="{eid}">{fallback}</tg-emoji>'
 
 
-EMOJI_BACK   = "5233735937317447077"
+EMOJI_BACK   = "6039539366177541657"
 EMOJI_CROSS  = "5906949717859230132"
 EMOJI_COIN   = "5285484782791177666"  # 💲
 EMOJI_CHET       = "5330320040883411678"
@@ -105,16 +105,16 @@ EMOJI_CHOOSE_GAME   = "5864019342873598613"  # 🧠 — "Выберите игр
 
 # --- ТИПЫ СТАВОК ДЛЯ 1 КУБА ---
 DICE_BET_TYPES = {
-    'куб_нечет':   {'values': [1, 3, 5], 'multiplier': 1.9},
-    'куб_чет':     {'values': [2, 4, 6], 'multiplier': 1.9},
-    'куб_мал':     {'values': [1, 2, 3], 'multiplier': 1.9},
-    'куб_бол':     {'values': [4, 5, 6], 'multiplier': 1.9},
-    'куб_1':       {'values': [1], 'multiplier': 5.7},
-    'куб_2':       {'values': [2], 'multiplier': 5.7},
-    'куб_3':       {'values': [3], 'multiplier': 5.7},
-    'куб_4':       {'values': [4], 'multiplier': 5.7},
-    'куб_5':       {'values': [5], 'multiplier': 5.7},
-    'куб_6':       {'values': [6], 'multiplier': 5.7},
+    'куб_нечет':   {'values': [1, 3, 5], 'multiplier': 2.0},
+    'куб_чет':     {'values': [2, 4, 6], 'multiplier': 2.0},
+    'куб_мал':     {'values': [1, 2, 3], 'multiplier': 2.0},
+    'куб_бол':     {'values': [4, 5, 6], 'multiplier': 2.0},
+    'куб_1':       {'values': [1], 'multiplier': 6.0},
+    'куб_2':       {'values': [2], 'multiplier': 6.0},
+    'куб_3':       {'values': [3], 'multiplier': 6.0},
+    'куб_4':       {'values': [4], 'multiplier': 6.0},
+    'куб_5':       {'values': [5], 'multiplier': 6.0},
+    'куб_6':       {'values': [6], 'multiplier': 6.0},
 }
 
 # --- ТИПЫ СТАВОК ДЛЯ 2 КУБОВ ---
@@ -189,8 +189,8 @@ DART_2_BET_TYPES = {
 
 BOWLING_BET_TYPES = {
     # --- 1 бросок: против бота ---
-    'боулинг_поражение': {'values': [], 'multiplier': 1.8, 'special': 'bowling_vs'},
-    'боулинг_победа':    {'values': [], 'multiplier': 1.8, 'special': 'bowling_vs'},
+    'боулинг_поражение': {'values': [], 'multiplier': 2.0, 'special': 'bowling_vs'},
+    'боулинг_победа':    {'values': [], 'multiplier': 2.0, 'special': 'bowling_vs'},
     # --- 1 бросок: точный исход. Значения Telegram-эмодзи 🎳:
     #     1 = промах (мимо всех кегль), 2 = сбита 1 кегля, 3 = 3 кегли,
     #     4 = 4 кегли, 5 = 5 кеглей, 6 = страйк (все 6). 6 исходов по 1/6 -> x6. ---
@@ -1609,22 +1609,22 @@ def _dice_outcome_rows(active: str) -> list:
         # Всё сразу плоским списком, без под-меню (как в 2 куба / 3 куба)
         return [
             [
-                InlineKeyboardButton(text="Нечет (x1.9)", callback_data="bet_dice_куб_нечет"),
-                InlineKeyboardButton(text="Чет (x1.9)", callback_data="bet_dice_куб_чет")
+                InlineKeyboardButton(text="Нечет (x2)", callback_data="bet_dice_куб_нечет"),
+                InlineKeyboardButton(text="Чет (x2)", callback_data="bet_dice_куб_чет")
             ],
             [
-                InlineKeyboardButton(text="Меньше (x1.9)", callback_data="bet_dice_куб_мал"),
-                InlineKeyboardButton(text="Больше (x1.9)", callback_data="bet_dice_куб_бол")
+                InlineKeyboardButton(text="Меньше (x2)", callback_data="bet_dice_куб_мал"),
+                InlineKeyboardButton(text="Больше (x2)", callback_data="bet_dice_куб_бол")
             ],
             [
-                InlineKeyboardButton(text="1 (x5.7)", callback_data="bet_dice_куб_1"),
-                InlineKeyboardButton(text="2 (x5.7)", callback_data="bet_dice_куб_2"),
-                InlineKeyboardButton(text="3 (x5.7)", callback_data="bet_dice_куб_3")
+                InlineKeyboardButton(text="1 (x6)", callback_data="bet_dice_куб_1"),
+                InlineKeyboardButton(text="2 (x6)", callback_data="bet_dice_куб_2"),
+                InlineKeyboardButton(text="3 (x6)", callback_data="bet_dice_куб_3")
             ],
             [
-                InlineKeyboardButton(text="4 (x5.7)", callback_data="bet_dice_куб_4"),
-                InlineKeyboardButton(text="5 (x5.7)", callback_data="bet_dice_куб_5"),
-                InlineKeyboardButton(text="6 (x5.7)", callback_data="bet_dice_куб_6")
+                InlineKeyboardButton(text="4 (x6)", callback_data="bet_dice_куб_4"),
+                InlineKeyboardButton(text="5 (x6)", callback_data="bet_dice_куб_5"),
+                InlineKeyboardButton(text="6 (x6)", callback_data="bet_dice_куб_6")
             ],
         ]
     elif active == '2куба':
@@ -1740,14 +1740,14 @@ async def dice_tab_switch(callback: CallbackQuery, state: FSMContext):
 async def show_exact_number_menu(callback: CallbackQuery, betting_game: 'BettingGame' = None):
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="1 (x5.7)", callback_data="bet_dice_куб_1"),
-            InlineKeyboardButton(text="2 (x5.7)", callback_data="bet_dice_куб_2"),
-            InlineKeyboardButton(text="3 (x5.7)", callback_data="bet_dice_куб_3")
+            InlineKeyboardButton(text="1 (x6)", callback_data="bet_dice_куб_1"),
+            InlineKeyboardButton(text="2 (x6)", callback_data="bet_dice_куб_2"),
+            InlineKeyboardButton(text="3 (x6)", callback_data="bet_dice_куб_3")
         ],
         [
-            InlineKeyboardButton(text="4 (x5.7)", callback_data="bet_dice_куб_4"),
-            InlineKeyboardButton(text="5 (x5.7)", callback_data="bet_dice_куб_5"),
-            InlineKeyboardButton(text="6 (x5.7)", callback_data="bet_dice_куб_6")
+            InlineKeyboardButton(text="4 (x6)", callback_data="bet_dice_куб_4"),
+            InlineKeyboardButton(text="5 (x6)", callback_data="bet_dice_куб_5"),
+            InlineKeyboardButton(text="6 (x6)", callback_data="bet_dice_куб_6")
         ],
         [
             InlineKeyboardButton(text="Назад", callback_data="game_dice", icon_custom_emoji_id=EMOJI_BACK)
