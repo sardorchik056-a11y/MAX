@@ -90,6 +90,13 @@ import bonus as bonus_module
 
 bonus_module.ALERT_ADMIN_IDS = set(ADMIN_IDS)
 
+# Обязательная подписка на канал(ы) (см. subscription.py). Список каналов админ ведёт
+# через админ-панель; SubscriptionMiddleware блокирует весь бот для тех, кто подписан
+# не на все каналы. Админов модуль не проверяет никогда.
+import subscription as subscription_module
+
+subscription_module.ADMIN_IDS = set(ADMIN_IDS)
+
 
 # --------------------------------------------------------------------------
 # Хранилище данных о пользователях (временное, in-memory) — чтобы можно было
@@ -557,6 +564,9 @@ def admin_panel_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="Рассылка", callback_data="admin:broadcast"),
             ],
             [
+                InlineKeyboardButton(text="🔒 Обязательная подписка", callback_data="admin:subs"),
+            ],
+            [
                 InlineKeyboardButton(text="Закрыть", callback_data="admin:close"),
             ],
         ]
@@ -947,16 +957,17 @@ def format_check_created_text(check: dict) -> str:
     )
 
 
-@router.message(CommandStart(deep_link=True))
-async def cmd_start_deep_link(message: Message, command: CommandObject, state: FSMContext) -> None:
-    remember_user(message.from_user)
-    await state.clear()
+async def send_start_welcome(bot: Bot, chat_id: int, user, payload: str | None) -> None:
+    """Обрабатывает deep-link payload (если он был) и отправляет приветствие с меню.
 
-    payload = command.args or ""
+    Вызывается из /start напрямую (когда подписка не нужна или уже выполнена), а
+    также из subscription.py — после того, как пользователь подтвердил подписку
+    кнопкой «Я подписался» (см. subscription_module.set_on_verified ниже)."""
+    payload = payload or ""
     result_line = ""
     if payload.startswith("check_"):
         code = payload[len("check_") :]
-        ok, msg, amount = activate_check(message.from_user.id, code)
+        ok, msg, amount = activate_check(user.id, code)
         if ok:
             result_line = (
                 '<tg-emoji emoji-id="6037175527846975726">✅</tg-emoji> '
@@ -966,29 +977,65 @@ async def cmd_start_deep_link(message: Message, command: CommandObject, state: F
             result_line = f"❌ {msg}\n\n"
     elif payload.startswith("bcheck_"):
         ok, msg, amount = await asyncio.to_thread(
-            bonus_module.activate_check, message.from_user.id, payload[len("bcheck_") :]
+            bonus_module.activate_check, user.id, payload[len("bcheck_") :]
         )
         result_line = bonus_module.activation_text(amount) if ok else f"❌ {msg}\n\n"
     elif payload.startswith("ref_"):
-        if await refs_module.bind_from_payload(message.bot, message.from_user, payload):
+        if await refs_module.bind_from_payload(bot, user, payload):
             result_line = "🤝 Вы присоединились по приглашению партнёра!\n\n"
 
-    await message.answer(
-        f"{result_line}Привет, {message.from_user.full_name}! 👋\n\n"
+    await bot.send_message(
+        chat_id,
+        f"{result_line}Привет, {user.full_name}! 👋\n\n"
         "Выберите раздел из меню ниже.",
         reply_markup=main_reply_keyboard(),
     )
+
+
+# Подключаем shared-функцию выше как колбэк для subscription.py: она вызывает её
+# после успешной проверки подписки (кнопка «Я подписался»), чтобы новый пользователь
+# всё-таки получил приветствие/меню и, если был deep-link, — начисление по нему.
+subscription_module.set_on_verified(send_start_welcome)
+
+
+@router.message(CommandStart(deep_link=True))
+async def cmd_start_deep_link(message: Message, command: CommandObject, state: FSMContext) -> None:
+    remember_user(message.from_user)
+    await state.clear()
+
+    payload = command.args or ""
+
+    missing = (
+        []
+        if is_admin(message.from_user.id)
+        else await subscription_module.get_missing_channels(message.bot, message.from_user.id)
+    )
+    if missing:
+        # Деплинк (например, чек) применится после подтверждения подписки — см. subscription.py.
+        await state.update_data(pending_start_payload=payload)
+        text, markup = subscription_module.format_required_screen(missing)
+        await message.answer(text, reply_markup=markup)
+        return
+
+    await send_start_welcome(message.bot, message.chat.id, message.from_user, payload)
 
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext) -> None:
     remember_user(message.from_user)
     await state.clear()
-    await message.answer(
-        f"Привет, {message.from_user.full_name}! 👋\n\n"
-        "Выберите раздел из меню ниже.",
-        reply_markup=main_reply_keyboard(),
+
+    missing = (
+        []
+        if is_admin(message.from_user.id)
+        else await subscription_module.get_missing_channels(message.bot, message.from_user.id)
     )
+    if missing:
+        text, markup = subscription_module.format_required_screen(missing)
+        await message.answer(text, reply_markup=markup)
+        return
+
+    await send_start_welcome(message.bot, message.chat.id, message.from_user, None)
 
 
 @router.message(F.text == "Меню")
@@ -1818,6 +1865,13 @@ async def main() -> None:
     dp.include_router(payments_router)
     dp.include_router(refs_router)
     dp.include_router(games_router)
+    dp.include_router(subscription_module.router)
+
+    # Глобальный гейт обязательной подписки — outer-миддлварь, отрабатывает раньше
+    # ЛЮБОГО хендлера во ВСЕХ роутерах выше (games/payments/refs/чеки/профиль и т.д.).
+    # Пока список каналов пуст — не делает вообще ничего (см. subscription.py).
+    dp.message.outer_middleware(subscription_module.SubscriptionMiddleware())
+    dp.callback_query.outer_middleware(subscription_module.SubscriptionMiddleware())
 
     # Создаёт единственный экземпляр BettingGame и регистрирует его как
     # общий для games.py (через set_betting_game внутри __init__), чтобы все
