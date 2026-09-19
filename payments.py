@@ -50,6 +50,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 import refs
+from ui import edit_any, edit_by_id
 from storage import adjust_balance, get_profile_stats
 
 # --------------------------------------------------------------------------
@@ -593,10 +594,11 @@ async def _edit_invoice_message(bot: Bot, dep: sqlite3.Row, text: str) -> None:
     if not dep["chat_id"] or not dep["message_id"]:
         return
     try:
-        await bot.edit_message_text(
+        await edit_by_id(
+            bot,
+            dep["chat_id"],
+            dep["message_id"],
             text,
-            chat_id=dep["chat_id"],
-            message_id=dep["message_id"],
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[[InlineKeyboardButton(text="Назад", callback_data="menu:profile", icon_custom_emoji_id=EMOJI_BACK)]]
             ),
@@ -1049,7 +1051,7 @@ def _amount_keyboard(provider_key: str) -> InlineKeyboardMarkup:
 async def show_deposit_methods(callback: CallbackQuery, state: FSMContext) -> None:
     """Экран выбора способа пополнения (вызывается из main.py по кнопке «Пополнить»)."""
     await state.clear()
-    await callback.message.edit_text(
+    await edit_any(callback.message, 
         f"{DEPOSIT_ICON} <b>Пополнение баланса</b>\n\n"
         "<i>Выберите способ оплаты. Счёт создаётся автоматически, "
         "баланс пополнится сразу после оплаты.</i>",
@@ -1071,7 +1073,7 @@ async def deposit_method_chosen(callback: CallbackQuery, state: FSMContext) -> N
 
     await state.set_state(DepositStates.waiting_amount)
     await state.update_data(dep_provider=provider_key, dep_ts=time.time())
-    await callback.message.edit_text(
+    await edit_any(callback.message, 
         f"{DEPOSIT_ICON} <b>Пополнение — {_provider_label(provider)}</b>\n\n"
         f"<i>Выберите сумму или отправьте её в чат числом (от {MIN_DEPOSIT_USD:g}$ до {MAX_DEPOSIT_USD:g}$).</i>",
         reply_markup=_amount_keyboard(provider_key),
@@ -1143,7 +1145,7 @@ async def _start_deposit(
     text, kb = _invoice_text(provider_key, amount), _invoice_keyboard(dep_id, pay_url)
     if panel is not None:
         try:
-            await panel.edit_text(text, reply_markup=kb)
+            await edit_any(panel, text, kb)
             await _run(_db_set_message, dep_id, panel.chat.id, panel.message_id)
             return None
         except Exception:
@@ -1332,7 +1334,7 @@ async def show_withdraw_methods(callback: CallbackQuery, state: FSMContext) -> N
             f"Минимальная сумма вывода — {MIN_WITHDRAW_USD:g}$. Ваш баланс: {_fmt_usd(balance)}", show_alert=True
         )
         return
-    await callback.message.edit_text(
+    await edit_any(callback.message, 
         f"{WITHDRAW_ICON} <b>Вывод средств</b>\n\n"
         f"└ Доступно: <b>{_fmt_usd(balance)}</b>\n\n"
         "<i>Выберите способ вывода. Средства придут в USDT на ваш аккаунт Telegram "
@@ -1362,7 +1364,7 @@ async def withdraw_method_chosen(callback: CallbackQuery, state: FSMContext) -> 
 
     await state.set_state(WithdrawStates.waiting_amount)
     await state.update_data(wd_provider=provider_key, wd_ts=time.time())
-    await callback.message.edit_text(
+    await edit_any(callback.message, 
         f"{WITHDRAW_ICON} <b>Вывод — {_provider_label(provider)}</b>\n\n"
         f"┌ Доступно: <b>{_fmt_usd(balance)}</b>\n"
         f"└ Лимиты: <b>от {MIN_WITHDRAW_USD:g}$ до {MAX_WITHDRAW_USD:g}$</b>\n\n"
@@ -1390,7 +1392,7 @@ async def withdraw_amount_chosen(callback: CallbackQuery, state: FSMContext) -> 
         return
 
     await state.clear()
-    await callback.message.edit_text(
+    await edit_any(callback.message, 
         _wd_confirm_text(provider, amount), reply_markup=_wd_confirm_keyboard(provider_key, amount)
     )
     await callback.answer()
@@ -1450,6 +1452,6 @@ async def withdraw_confirm(callback: CallbackQuery, state: FSMContext) -> None:
 
     await callback.answer()
     try:
-        await callback.message.edit_text(result.text, reply_markup=_result_keyboard(result.status))
+        await edit_any(callback.message, result.text, reply_markup=_result_keyboard(result.status))
     except Exception:
         await _notify_user(callback.bot, user_id, result.text, result.status)
