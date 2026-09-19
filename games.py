@@ -1674,11 +1674,7 @@ def _build_basketball_menu_content(betting_game: 'BettingGame' = None, user_id: 
         ],
         [
             InlineKeyboardButton(text=f"2× {_BASKETBALL_DOUBLE_TARGET_NAME.get(1, '1')} (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_1"),
-            InlineKeyboardButton(text="2× 2 (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_2"),
-            InlineKeyboardButton(text=f"2× {_BASKETBALL_DOUBLE_TARGET_NAME.get(3, '3')} (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_3")
-        ],
-        [
-            InlineKeyboardButton(text="2× 4 (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_4"),
+            InlineKeyboardButton(text=f"2× {_BASKETBALL_DOUBLE_TARGET_NAME.get(3, '3')} (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_3"),
             InlineKeyboardButton(text=f"2× {_BASKETBALL_DOUBLE_TARGET_NAME.get(5, '5')} (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_5")
         ],
         [
@@ -1759,22 +1755,14 @@ async def show_football_menu(callback: CallbackQuery, betting_game: 'BettingGame
 def _build_darts_menu_content(betting_game: 'BettingGame' = None, user_id: int = 0):
     markup = InlineKeyboardMarkup(inline_keyboard=[
         _tabs_row('darts'),
-        [
-            InlineKeyboardButton(text="Белое (x3)", callback_data="bet_darts_дартс_белое"),
-            InlineKeyboardButton(text="Красное (x3)", callback_data="bet_darts_дартс_красное")
-        ],
-        [
-            InlineKeyboardButton(text="Центр (x6)", callback_data="bet_darts_дартс_центр"),
-            InlineKeyboardButton(text="Мимо (x6)", callback_data="bet_darts_дартс_мимо")
-        ],
-        [
-            InlineKeyboardButton(text="Дубль белое (x9)", callback_data="bet_darts_дартс2_дубльбелое"),
-            InlineKeyboardButton(text="Дубль красное (x9)", callback_data="bet_darts_дартс2_дублькрасное")
-        ],
-        [
-            InlineKeyboardButton(text="Дубль центр (x36)", callback_data="bet_darts_дартс2_дубльцентр"),
-            InlineKeyboardButton(text="Дубль мимо (x36)", callback_data="bet_darts_дартс2_дубльмимо")
-        ],
+        [InlineKeyboardButton(text="Мимо (x6)", callback_data="bet_darts_дартс_мимо")],
+        [InlineKeyboardButton(text="Красное (x3)", callback_data="bet_darts_дартс_красное")],
+        [InlineKeyboardButton(text="Белое (x3)", callback_data="bet_darts_дартс_белое")],
+        [InlineKeyboardButton(text="Центр (x6)", callback_data="bet_darts_дартс_центр")],
+        [InlineKeyboardButton(text="Дубль мимо (x36)", callback_data="bet_darts_дартс2_дубльмимо")],
+        [InlineKeyboardButton(text="Дубль красное (x9)", callback_data="bet_darts_дартс2_дублькрасное")],
+        [InlineKeyboardButton(text="Дубль белое (x9)", callback_data="bet_darts_дартс2_дубльбелое")],
+        [InlineKeyboardButton(text="Дубль центр (x36)", callback_data="bet_darts_дартс2_дубльцентр")],
         [
             InlineKeyboardButton(text="Назад", callback_data="games", icon_custom_emoji_id=EMOJI_BACK)
         ]
