@@ -84,6 +84,13 @@ from storage import (
     log_game_round,
 )
 
+# Бонусный баланс (см. bonus.py). Хук на ставки (storage.log_game_round) ОБЯЗАТЕЛЬНО ставим до
+# `import games` ниже — иначе games.py получит необёрнутую функцию и ставки не пойдут в отыгрыш.
+import bonus as bonus_module
+
+bonus_module.ALERT_ADMIN_IDS = set(ADMIN_IDS)
+bonus_module.install_bet_hook()
+
 
 # --------------------------------------------------------------------------
 # Хранилище данных о пользователях (временное, in-memory) — чтобы можно было
@@ -767,6 +774,18 @@ def my_checks_keyboard(codes: list[str]) -> InlineKeyboardMarkup:
 router = Router()
 
 
+def bonus_profile_lines(user_id: int) -> list[str]:
+    """Строки бонусного баланса для профиля: сумма 💎 и сколько ещё нужно отыграть."""
+    bonus = bonus_module.get_summary(user_id)
+    lines = [f"{bonus_module.BONUS_ICON} <b>Бонусный баланс:</b> ${bonus['balance']:.2f}"]
+    if bonus["balance"] > 0:
+        lines.append(
+            '<tg-emoji emoji-id="5778421276024509124">💰</tg-emoji> '
+            f"<b>Осталось отыграть:</b> ${bonus['remaining']:.2f}"
+        )
+    return lines
+
+
 def format_profile_text(user_id: int, full_name: str, username: str | None) -> str:
     stats = get_profile_stats(user_id)
     username_line = f"@{username}" if username else "не указан"
@@ -785,6 +804,7 @@ def format_profile_text(user_id: int, full_name: str, username: str | None) -> s
         [
             '<tg-emoji emoji-id="5769126056262898415">👛</tg-emoji> '
             f"<b>Баланс:</b> ${stats['balance']:.2f}",
+            *bonus_profile_lines(user_id),
             '<tg-emoji emoji-id="5902206159095339799">🤑</tg-emoji> '
             f"<b>Всего депозитов:</b> ${stats['deposits']:.2f}",
             '<tg-emoji emoji-id="5890848474563352982">🪙</tg-emoji> '
@@ -945,6 +965,11 @@ async def cmd_start_deep_link(message: Message, command: CommandObject, state: F
             )
         else:
             result_line = f"❌ {msg}\n\n"
+    elif payload.startswith("bcheck_"):
+        ok, msg, amount = await asyncio.to_thread(
+            bonus_module.activate_check, message.from_user.id, payload[len("bcheck_") :]
+        )
+        result_line = bonus_module.activation_text(amount) if ok else f"❌ {msg}\n\n"
     elif payload.startswith("ref_"):
         if await refs_module.bind_from_payload(message.bot, message.from_user, payload):
             result_line = "🤝 Вы присоединились по приглашению партнёра!\n\n"
@@ -1427,6 +1452,53 @@ async def menu_callback(callback: CallbackQuery) -> None:
 
 
 # --------------------------------------------------------------------------
+# Бонусные чеки (/addcheck — только админы)
+# --------------------------------------------------------------------------
+
+
+@router.message(Command("addcheck"))
+async def cmd_addcheck(message: Message, command: CommandObject) -> None:
+    """/addcheck <сумма> [активаций] — создаёт чек на бонусный баланс (💎).
+    Бонус переводится на реальный баланс после ставок на ×3 от суммы (см. bonus.py)."""
+    if not is_admin(message.from_user.id):
+        await message.answer("🚫 Доступ запрещён.")
+        return
+
+    usage = (
+        f"{bonus_module.BONUS_ICON} <b>Бонусный чек</b>\n\n"
+        "Формат: <code>/addcheck &lt;сумма&gt; [активаций]</code>\n"
+        "Пример: <code>/addcheck 0.5 100</code> — бонус $0.50, 100 активаций.\n\n"
+        f"<i>Бонус переходит на реальный баланс после ставок на ×{bonus_module.WAGER_MULT:g} от его суммы.</i>"
+    )
+    parts = (command.args or "").replace(",", ".").split()
+    try:
+        amount = round(float(parts[0]), 2)
+        activations = int(parts[1]) if len(parts) > 1 else 1
+    except (IndexError, ValueError):
+        await message.answer(usage)
+        return
+    if not (0.01 <= amount <= bonus_module.MAX_CHECK_AMOUNT) or not (
+        1 <= activations <= bonus_module.MAX_CHECK_ACTIVATIONS
+    ):
+        await message.answer(
+            f"❌ Сумма — от $0.01 до ${bonus_module.MAX_CHECK_AMOUNT:,.0f}, "
+            f"активаций — от 1 до {bonus_module.MAX_CHECK_ACTIVATIONS:,}.\n\n{usage}"
+        )
+        return
+
+    code = await asyncio.to_thread(bonus_module.create_check, message.from_user.id, amount, activations)
+    link = await bonus_module.check_link(message.bot, code)
+    await message.answer(
+        f"{bonus_module.BONUS_ICON} <b>Бонусный чек создан</b>\n\n"
+        f"┌ Бонус за активацию: <b>${amount:,.2f}</b>\n"
+        f"├ Активаций: <b>{activations}</b>\n"
+        f"├ Отыгрыш: <b>×{bonus_module.WAGER_MULT:g}</b> (ставок на ${amount * bonus_module.WAGER_MULT:,.2f})\n"
+        f"└ Код: <code>{code}</code>\n\n"
+        f"🔗 {link}"
+    )
+
+
+# --------------------------------------------------------------------------
 # Картинка главного меню (/img — только админы)
 # --------------------------------------------------------------------------
 
@@ -1751,6 +1823,7 @@ async def main() -> None:
     # общий для games.py (через set_betting_game внутри __init__), чтобы все
     # хендлеры раздела «Игры» могли получить его через get_betting_game().
     games_module.BettingGame(bot)
+    bonus_module.set_bot(bot)  # уведомления «бонус отыгран»
 
     global BOT_USERNAME
     me = await bot.get_me()
