@@ -66,17 +66,19 @@ from storage import adjust_balance, get_profile_stats
 #              (тестовая сеть: @xrocket_testnet_bot)
 #
 # Пустая строка = провайдер отключён (кнопка покажет «временно недоступен»).
-CRYPTOBOT_TOKEN = "582363:AALEf7JOugnrQyrkMHzH5UrO7pdOjjYnTQy"   # <- вставьте API Token из @CryptoBot
-XROCKET_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhcHBJZCI6IjMwMDgzMiIsImp0aSI6ImFwcDozMDA4MzI6ZTM5MDM0ZmMtMWU2MC00MjdjLWEzNjktOWU2ZDI3YzQ3YWI0IiwiaWF0IjoxNzg5ODAxMjcwfQ.ZD9DA2KUtwes2rDwKEreoRzUuRSqw_0hB9kQWgM_7c0"     # <- вставьте API Token из @xRocket
+CRYPTOBOT_TOKEN = ""   # <- вставьте API Token из @CryptoBot
+XROCKET_TOKEN = ""     # <- вставьте API Token из @xRocket
 
 CRYPTOBOT_TESTNET = False
 XROCKET_TESTNET = False
 
-MIN_DEPOSIT_USD = 1.0
+MIN_DEPOSIT_USD = 1.1
 MAX_DEPOSIT_USD = 10000.0
-QUICK_AMOUNTS = (1, 5, 10, 25, 50, 100)
+QUICK_AMOUNTS = (2, 5, 10, 25, 50, 100)
 
 # --- Вывод средств ---
+# Вывод открывается только после пополнения минимум на эту сумму (защита от ботов и «халявщиков»).
+MIN_DEPOSIT_TO_WITHDRAW_USD = 1.1
 MIN_WITHDRAW_USD = 1.0
 MAX_WITHDRAW_USD = 10000.0
 WITHDRAW_QUICK_AMOUNTS = (5, 10, 25, 50, 100)
@@ -97,7 +99,6 @@ ALERT_ADMIN_IDS: set[int] = set()
 
 INVOICE_TTL_SECONDS = 30 * 60          # счёт живёт 30 минут
 EXPIRE_GRACE_SECONDS = 10 * 60         # после этого без оплаты считаем счёт закрытым
-MAX_PENDING_PER_USER = 3               # сколько неоплаченных счетов может быть одновременно
 AMOUNT_INPUT_TTL_SECONDS = 10 * 60     # сколько бот ждёт ввод суммы
 
 CRYPTOBOT_POLL_SECONDS = 6             # пакетная проверка всех счетов CryptoBot
@@ -484,13 +485,13 @@ def _db_pending(provider: str | None = None) -> list[sqlite3.Row]:
         return conn.execute(query + " ORDER BY last_check ASC, id ASC", args).fetchall()
 
 
-def _db_count_pending(user_id: int) -> int:
+def _db_total_deposited(user_id: int) -> float:
+    """Сколько игрок реально пополнил (только оплаченные счета)."""
     with closing(_conn()) as conn:
         row = conn.execute(
-            "SELECT COUNT(*) FROM deposits WHERE user_id = ? AND status = 'pending' AND created_at > ?",
-            (user_id, time.time() - INVOICE_TTL_SECONDS - EXPIRE_GRACE_SECONDS),
+            "SELECT COALESCE(SUM(amount), 0) FROM deposits WHERE user_id = ? AND status = 'paid'", (user_id,)
         ).fetchone()
-        return int(row[0])
+        return float(row[0])
 
 
 def _db_set_message(dep_id: int, chat_id: int, message_id: int) -> None:
@@ -693,6 +694,25 @@ def _paid_text(provider: CryptoBotClient | XRocketClient, user_id: int, amount: 
     )
 
 
+async def _deposit_requirement_error(user_id: int) -> str | None:
+    """Текст ошибки, если игрок ещё не пополнял баланс на минимальную сумму (иначе None)."""
+    if await _run(_db_total_deposited, user_id) + 0.005 < MIN_DEPOSIT_TO_WITHDRAW_USD:
+        return (
+            f"Вывод недоступен: сначала пополните баланс минимум на {MIN_DEPOSIT_TO_WITHDRAW_USD:g}$. "
+            "Это защита от ботов и злоупотреблений."
+        )
+    return None
+
+
+async def _deposit_gate_error(user_id: int) -> str | None:
+    """То же, но сбой проверки тоже превращается в «обратитесь в поддержку»."""
+    try:
+        return await _deposit_requirement_error(user_id)
+    except Exception:
+        log.exception("[withdraw] не удалось проверить депозиты user=%s", user_id)
+        return f"Ошибка. Обратитесь в поддержку: {SUPPORT_HANDLE}"
+
+
 async def _alert_admins(bot: Bot, text: str) -> None:
     """Сообщаем админам о сбое вывода (текст — уже безопасный HTML)."""
     for admin_id in ALERT_ADMIN_IDS:
@@ -769,6 +789,14 @@ async def _execute_withdrawal(bot: Bot, user_id: int, provider_key: str, amount:
         return _rejected(f"{provider.title} временно недоступен")
     if not MIN_WITHDRAW_USD <= amount <= MAX_WITHDRAW_USD:
         return _rejected(f"Сумма вывода должна быть от {MIN_WITHDRAW_USD:g}$ до {MAX_WITHDRAW_USD:g}$")
+
+    try:
+        deposit_error = await _deposit_requirement_error(user_id)
+    except Exception:
+        log.exception("[withdraw] не удалось проверить депозиты user=%s", user_id)
+        return WithdrawResult("failed", _error_text("Не удалось выполнить вывод", None))
+    if deposit_error:
+        return _rejected(deposit_error)
 
     lock = _wd_locks.setdefault(user_id, asyncio.Lock())
     if lock.locked():
@@ -1096,8 +1124,6 @@ async def _start_deposit(
     provider = PROVIDERS[provider_key]
     if not provider.configured:
         return f"{provider.title} временно недоступен"
-    if await _run(_db_count_pending, user_id) >= MAX_PENDING_PER_USER:
-        return "У вас уже есть неоплаченные счета. Оплатите их или дождитесь истечения."
     try:
         dep_id, pay_url, _title = await _create_deposit(bot, user_id, provider_key, amount)
     except PaymentError as ex:
@@ -1353,7 +1379,7 @@ async def withdraw_amount_chosen(callback: CallbackQuery, state: FSMContext) -> 
     if provider is None:
         await callback.answer("Неизвестный способ", show_alert=True)
         return
-    error = _amount_error(callback.from_user.id, amount)
+    error = _amount_error(callback.from_user.id, amount) or await _deposit_gate_error(callback.from_user.id)
     if error:
         await callback.answer(error, show_alert=True)
         return
@@ -1380,6 +1406,12 @@ async def withdraw_amount_message(message: Message, state: FSMContext) -> None:
     amount = round(float(text), 2)
     error = _amount_error(message.from_user.id, amount)
     if error:
+        await message.answer(error)  # сумма неверная — даём ввести заново
+        return
+
+    error = await _deposit_gate_error(message.from_user.id)
+    if error:
+        await state.clear()  # пополнить нужно в любом случае — режим ввода суммы закрываем
         await message.answer(error)
         return
 
