@@ -84,12 +84,11 @@ from storage import (
     log_game_round,
 )
 
-# Бонусный баланс (см. bonus.py). Хук на ставки (storage.log_game_round) ОБЯЗАТЕЛЬНО ставим до
-# `import games` ниже — иначе games.py получит необёрнутую функцию и ставки не пойдут в отыгрыш.
+# Бонусный баланс (см. bonus.py). games.py сам списывает ставки с бонусного кошелька и учитывает
+# отыгрыш (bonus.try_spend / settle / refund) — хук на storage.log_game_round больше не нужен.
 import bonus as bonus_module
 
 bonus_module.ALERT_ADMIN_IDS = set(ADMIN_IDS)
-bonus_module.install_bet_hook()
 
 
 # --------------------------------------------------------------------------
@@ -1459,7 +1458,7 @@ async def menu_callback(callback: CallbackQuery) -> None:
 @router.message(Command("addcheck"))
 async def cmd_addcheck(message: Message, command: CommandObject) -> None:
     """/addcheck <сумма> [активаций] — создаёт чек на бонусный баланс (💎).
-    Бонус переводится на реальный баланс после ставок на ×3 от суммы (см. bonus.py)."""
+    После бонусных ставок на ×3 от суммы на реальный баланс переходит начальная сумма (см. bonus.py)."""
     if not is_admin(message.from_user.id):
         await message.answer("🚫 Доступ запрещён.")
         return
@@ -1468,7 +1467,8 @@ async def cmd_addcheck(message: Message, command: CommandObject) -> None:
         f"{bonus_module.BONUS_ICON} <b>Бонусный чек</b>\n\n"
         "Формат: <code>/addcheck &lt;сумма&gt; [активаций]</code>\n"
         "Пример: <code>/addcheck 0.5 100</code> — бонус $0.50, 100 активаций.\n\n"
-        f"<i>Бонус переходит на реальный баланс после ставок на ×{bonus_module.WAGER_MULT:g} от его суммы.</i>"
+        f"<i>Играть можно с бонусного баланса. После бонусных ставок на ×{bonus_module.WAGER_MULT:g} от суммы "
+        "на реальный баланс переходит только начальная сумма бонуса.</i>"
     )
     parts = (command.args or "").replace(",", ".").split()
     try:
