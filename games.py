@@ -143,11 +143,16 @@ DICE_3_BET_TYPES = {
 }
 
 BASKETBALL_BET_TYPES = {
-    'баскет_промах':    {'values': [1],    'multiplier': 1.66},
-    'баскет_отскок':    {'values': [2],    'multiplier': 5.0},
+    'баскет_промах':    {'values': [1, 2], 'multiplier': 1.66},
+    'баскет_отскок':    {'values': [1],    'multiplier': 5.0},
     'баскет_застрял':   {'values': [3],    'multiplier': 5.0},
     'баскет_любойгол':  {'values': [4, 5], 'multiplier': 2.5},
     'баскет_чистыйгол': {'values': [5],    'multiplier': 5.0},
+    # --- 2 броска подряд (по аналогии с футбольными дублями) ---
+    'баскет_любойдубль':      {'multiplier': 5.0,  'special': 'double_basketball_any_double'},
+    'баскет_конкретныйдубль': {'multiplier': 25.0, 'special': 'double_basketball_specific_double'},
+    'баскет_двагола':         {'multiplier': 6.25, 'special': 'double_basketball_both_goal'},
+    'баскет_двапромаха':      {'multiplier': 2.77, 'special': 'double_basketball_both_miss'},
 }
 
 FOOTBALL_BET_TYPES = {
@@ -216,6 +221,8 @@ BET_TYPE_TO_CODE = {
     'куб3_любойтрипл': 't_trp', 'куб3_конкретныйтрипл': 't_strp', 'куб3_произведение': 't_prod',
     'баскет_промах': 'bk_m', 'баскет_отскок': 'bk_o', 'баскет_застрял': 'bk_z',
     'баскет_любойгол': 'bk_g', 'баскет_чистыйгол': 'bk_c',
+    'баскет_любойдубль': 'bk_d', 'баскет_конкретныйдубль': 'bk_sd',
+    'баскет_двагола': 'bk_2g', 'баскет_двапромаха': 'bk_2m',
     'футбол_гол': 'fb_g', 'футбол_мимо': 'fb_m',
     'футбол_штанга': 'fb_p', 'футбол_мимоворот': 'fb_w', 'футбол_угол': 'fb_a',
     'футбол_центр': 'fb_c', 'футбол_девятка': 'fb_9',
@@ -238,6 +245,7 @@ _OUTCOME_LABELS = {
     'куб3_любойтрипл': 'Любой трипл', 'куб3_произведение': 'Произведение ≥108',
     'баскет_промах': 'Промах', 'баскет_отскок': 'Отскок', 'баскет_застрял': 'Застрял',
     'баскет_любойгол': 'Любой гол', 'баскет_чистыйгол': 'Чистый гол',
+    'баскет_любойдубль': 'Любой дубль', 'баскет_двагола': 'Два гола', 'баскет_двапромаха': 'Два промаха',
     'футбол_гол': 'Любой гол', 'футбол_мимо': 'Промах',
     'футбол_штанга': 'Штанга', 'футбол_мимоворот': 'Мимо ворот', 'футбол_угол': 'Гол под углом',
     'футбол_центр': 'Гол в центр', 'футбол_девятка': 'Девятка', 'футбол_любойдубль': 'Любой дубль',
@@ -256,6 +264,16 @@ for _fb_bt, _fb_cfg in FOOTBALL_BET_TYPES.items():
         _FOOTBALL_DOUBLE_TARGET_NAME[_fb_vals[0]] = _OUTCOME_LABELS.get(_fb_bt, _fb_bt)
 
 
+# --- Аналогично футболу: "число -> название" для конкретных дублей баскетбола,
+#     построено автоматически из BASKETBALL_BET_TYPES (только по исходам с одним
+#     конкретным значением — 2 и 4 общих названий не имеют, останутся как "2"/"4"). ---
+_BASKETBALL_DOUBLE_TARGET_NAME: Dict[int, str] = {}
+for _bk_bt, _bk_cfg in BASKETBALL_BET_TYPES.items():
+    _bk_vals = _bk_cfg.get('values')
+    if _bk_vals and len(_bk_vals) == 1:
+        _BASKETBALL_DOUBLE_TARGET_NAME[_bk_vals[0]] = _OUTCOME_LABELS.get(_bk_bt, _bk_bt)
+
+
 def _get_outcome_label(bet_type: str, bet_config: dict) -> str:
     if bet_type == 'куб2_конкретныйдубль':
         t = bet_config.get('target', 0)
@@ -263,6 +281,10 @@ def _get_outcome_label(bet_type: str, bet_config: dict) -> str:
     if bet_type == 'футбол_конкретныйдубль':
         t = bet_config.get('target', 0)
         name = _FOOTBALL_DOUBLE_TARGET_NAME.get(t, str(t))
+        return f'Дубль «{name}»'
+    if bet_type == 'баскет_конкретныйдубль':
+        t = bet_config.get('target', 0)
+        name = _BASKETBALL_DOUBLE_TARGET_NAME.get(t, str(t))
         return f'Дубль «{name}»'
     if bet_type == 'куб3_конкретныйтрипл':
         t = bet_config.get('target', 0)
@@ -309,7 +331,7 @@ def _build_replay_keyboard(user_id: int, bet_type: str, amount: float, bet_confi
     code = BET_TYPE_TO_CODE.get(bet_type)
     if not code:
         return None
-    target = bet_config.get('target') if bet_type in ('куб2_конкретныйдубль', 'куб3_конкретныйтрипл', 'футбол_конкретныйдубль') else None
+    target = bet_config.get('target') if bet_type in ('куб2_конкретныйдубль', 'куб3_конкретныйтрипл', 'футбол_конкретныйдубль', 'баскет_конкретныйдубль') else None
     target_str = str(target) if target is not None else ''
 
     def _cb(amt: float) -> str:
@@ -855,6 +877,63 @@ async def play_double_football_game(
     asyncio.create_task(_delayed_safe_reply(ball2, text, delay=3.0, reply_markup=keyboard))
 
 
+async def play_double_basketball_game(
+    chat_id: int,
+    user_id: int,
+    nickname: str,
+    amount: float,
+    bet_type: str,
+    bet_config: dict,
+    betting_game: BettingGame,
+    bet_msg: Message = None,
+):
+    """Два броска мяча в кольцо подряд: дубли (конкретный/любой), а также
+    'оба гола' и 'оба промаха' — по аналогии с двойным футболом, но с
+    категориями гол/промах, специфичными для баскетбола."""
+    send_kwargs = {'chat_id': chat_id, 'emoji': '🏀'}
+    if bet_msg:
+        send_kwargs['reply_to_message_id'] = bet_msg.message_id
+
+    ball1 = await betting_game.bot.send_dice(**send_kwargs)
+    await asyncio.sleep(2)
+
+    ball2_kwargs = {'chat_id': chat_id, 'emoji': '🏀'}
+    if bet_msg:
+        ball2_kwargs['reply_to_message_id'] = bet_msg.message_id
+    ball2 = await betting_game.bot.send_dice(**ball2_kwargs)
+
+    ball1_value = ball1.dice.value
+    ball2_value = ball2.dice.value
+    is_double = ball1_value == ball2_value
+
+    goal_values = BASKETBALL_BET_TYPES['баскет_любойгол']['values']
+    miss_values = BASKETBALL_BET_TYPES['баскет_промах']['values']
+
+    if bet_type == 'баскет_любойдубль':
+        is_win = is_double
+    elif bet_type == 'баскет_конкретныйдубль':
+        target = bet_config.get('target', 0)
+        is_win = is_double and ball1_value == target
+    elif bet_type == 'баскет_двагола':
+        is_win = ball1_value in goal_values and ball2_value in goal_values
+    elif bet_type == 'баскет_двапромаха':
+        is_win = ball1_value in miss_values and ball2_value in miss_values
+    else:
+        is_win = False
+
+    winnings = _apply_game_result(
+        user_id, nickname, amount, is_win, bet_config, betting_game, bet_type=bet_type
+    )
+
+    outcome_label = _get_outcome_label(bet_type, bet_config)
+    text = (
+        _build_win_text(nickname, user_id, amount, outcome_label, winnings)
+        if is_win else _build_lose_text(nickname, user_id, amount, outcome_label)
+    )
+    keyboard = _build_replay_keyboard(user_id, bet_type, amount, bet_config)
+    asyncio.create_task(_delayed_safe_reply(ball2, text, delay=3.0, reply_markup=keyboard))
+
+
 async def play_double_darts_game(
     chat_id: int,
     user_id: int,
@@ -1066,6 +1145,8 @@ async def _run_game(
         await play_double_dice_game(chat_id, user_id, nickname, amount, bet_type, bet_config, betting_game, bet_msg)
     elif bet_type in ('футбол_любойдубль', 'футбол_конкретныйдубль'):
         await play_double_football_game(chat_id, user_id, nickname, amount, bet_type, bet_config, betting_game, bet_msg)
+    elif bet_type in ('баскет_любойдубль', 'баскет_конкретныйдубль', 'баскет_двагола', 'баскет_двапромаха'):
+        await play_double_basketball_game(chat_id, user_id, nickname, amount, bet_type, bet_config, betting_game, bet_msg)
     elif bet_type.startswith('дартс2_'):
         await play_double_darts_game(chat_id, user_id, nickname, amount, bet_type, bet_config, betting_game, bet_msg)
     elif bet_type.startswith('боулинг_') and bet_config.get('special') == 'bowling_vs':
@@ -1592,6 +1673,22 @@ def _build_basketball_menu_content(betting_game: 'BettingGame' = None, user_id: 
             InlineKeyboardButton(text="Застрял (x5)", callback_data="bet_basketball_баскет_застрял")
         ],
         [
+            InlineKeyboardButton(text=f"2× {_BASKETBALL_DOUBLE_TARGET_NAME.get(1, '1')} (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_1"),
+            InlineKeyboardButton(text="2× 2 (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_2"),
+            InlineKeyboardButton(text=f"2× {_BASKETBALL_DOUBLE_TARGET_NAME.get(3, '3')} (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_3")
+        ],
+        [
+            InlineKeyboardButton(text="2× 4 (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_4"),
+            InlineKeyboardButton(text=f"2× {_BASKETBALL_DOUBLE_TARGET_NAME.get(5, '5')} (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_5")
+        ],
+        [
+            InlineKeyboardButton(text="Любой дубль (x5)", callback_data="bet_basketball_баскет_любойдубль")
+        ],
+        [
+            InlineKeyboardButton(text="Два гола (x6.25)", callback_data="bet_basketball_баскет_двагола"),
+            InlineKeyboardButton(text="Два промаха (x2.77)", callback_data="bet_basketball_баскет_двапромаха")
+        ],
+        [
             InlineKeyboardButton(text="Назад", callback_data="games", icon_custom_emoji_id=EMOJI_BACK)
         ]
     ])
@@ -1801,6 +1898,12 @@ async def request_amount(callback: CallbackQuery, state: FSMContext, betting_gam
     elif data.startswith("bet_football_футбол_конкретныйдубль_"):
         target = int(data.split("_")[-1])
         bet_type = "футбол_конкретныйдубль"
+        bet_config = betting_game.get_bet_config(bet_type)
+        if bet_config:
+            bet_config['target'] = target
+    elif data.startswith("bet_basketball_баскет_конкретныйдубль_"):
+        target = int(data.split("_")[-1])
+        bet_type = "баскет_конкретныйдубль"
         bet_config = betting_game.get_bet_config(bet_type)
         if bet_config:
             bet_config['target'] = target
