@@ -1860,12 +1860,15 @@ async def main() -> None:
     )
     dp = Dispatcher()
     dp.include_router(router)
-    # ВАЖНО: payments_router — до games_router. У games_router есть «ловец» любого текста
-    # (games_text_router), и он перехватил бы сумму пополнения, введённую в чат.
+    # ВАЖНО: subscription_module.router и payments_router — до games_router.
+    # У games_router есть «ловец» любого текста (games_text_router), не привязанный
+    # к конкретному FSM-состоянию, и он перехватил бы: (а) сумму пополнения,
+    # введённую в чат, и (б) @username/ссылку на канал, которую админ присылает
+    # в состоянии SubsStates.add_channel при добавлении обязательного канала.
+    dp.include_router(subscription_module.router)
     dp.include_router(payments_router)
     dp.include_router(refs_router)
     dp.include_router(games_router)
-    dp.include_router(subscription_module.router)
 
     # Глобальный гейт обязательной подписки — outer-миддлварь, отрабатывает раньше
     # ЛЮБОГО хендлера во ВСЕХ роутерах выше (games/payments/refs/чеки/профиль и т.д.).
