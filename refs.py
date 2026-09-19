@@ -48,6 +48,7 @@ from aiogram.types import (
 )
 
 from storage import adjust_balance, get_profile_stats
+from ui import edit_any
 
 # --------------------------------------------------------------------------
 # Настройки
@@ -432,7 +433,7 @@ async def show_partners(message: Message) -> None:
 
 async def _safe_edit(callback: CallbackQuery, text: str, kb: InlineKeyboardMarkup) -> None:
     try:
-        await callback.message.edit_text(text, reply_markup=kb)
+        await edit_any(callback.message, text, kb)
     except Exception:
         pass  # «message is not modified» / сообщение удалено — не критично
 
