@@ -93,10 +93,10 @@ EMOJI_GOAL       = "5206607081334906820"
 EMOJI_3POINT     = "5397782960512444700"
 EMOJI_MISS       = "5210952531676504517"
 
-EMOJI_REPLAY     = "5226472688058411001"
-EMOJI_RAISE      = "5224351111653139458"
-EMOJI_LOWER      = "5233410275717198826"
-EMOJI_CHANGE     = "5224490496226797830"
+EMOJI_REPLAY     = "6039859895291877126"
+EMOJI_RAISE      = "5890848474563352982"
+EMOJI_LOWER      = "5902206159095339799"
+EMOJI_CHANGE     = "5811925731785052842"
 
 EMOJI_MAGNIFY       = "5231012545799666522"
 EMOJI_BET_LABEL     = "5904462880941545555"  # 🪙 — "Ставка"
@@ -1755,14 +1755,14 @@ async def show_football_menu(callback: CallbackQuery, betting_game: 'BettingGame
 def _build_darts_menu_content(betting_game: 'BettingGame' = None, user_id: int = 0):
     markup = InlineKeyboardMarkup(inline_keyboard=[
         _tabs_row('darts'),
-        [InlineKeyboardButton(text="Мимо (x6)", callback_data="bet_darts_дартс_мимо")],
-        [InlineKeyboardButton(text="Красное (x3)", callback_data="bet_darts_дартс_красное")],
+        [InlineKeyboardButton(text="Мимо (x6)", callback_data="bet_darts_дартс_мимо"),
+         InlineKeyboardButton(text="Красное (x3)", callback_data="bet_darts_дартс_красное")],
         [InlineKeyboardButton(text="Белое (x3)", callback_data="bet_darts_дартс_белое")],
-        [InlineKeyboardButton(text="Центр (x6)", callback_data="bet_darts_дартс_центр")],
-        [InlineKeyboardButton(text="Дубль мимо (x36)", callback_data="bet_darts_дартс2_дубльмимо")],
+        [InlineKeyboardButton(text="Центр (x6)", callback_data="bet_darts_дартс_центр"),
+         InlineKeyboardButton(text="Дубль мимо (x36)", callback_data="bet_darts_дартс2_дубльмимо")],
         [InlineKeyboardButton(text="Дубль красное (x9)", callback_data="bet_darts_дартс2_дублькрасное")],
-        [InlineKeyboardButton(text="Дубль белое (x9)", callback_data="bet_darts_дартс2_дубльбелое")],
-        [InlineKeyboardButton(text="Дубль центр (x36)", callback_data="bet_darts_дартс2_дубльцентр")],
+        [InlineKeyboardButton(text="Дубль белое (x9)", callback_data="bet_darts_дартс2_дубльбелое"),
+         InlineKeyboardButton(text="Дубль центр (x36)", callback_data="bet_darts_дартс2_дубльцентр")],
         [
             InlineKeyboardButton(text="Назад", callback_data="games", icon_custom_emoji_id=EMOJI_BACK)
         ]
