@@ -143,7 +143,9 @@ DICE_3_BET_TYPES = {
 }
 
 BASKETBALL_BET_TYPES = {
-    'баскет_промах':    {'values': [1, 2], 'multiplier': 1.66},
+    # «Застрял» (3) тоже считается промахом: мяч не попал в корзину.
+    # Значения 1, 2, 3 = 3 из 5 исходов -> шанс 60% -> честный множитель ~1.66.
+    'баскет_промах':    {'values': [1, 2, 3], 'multiplier': 1.66},
     'баскет_отскок':    {'values': [1],    'multiplier': 5.0},
     'баскет_застрял':   {'values': [3],    'multiplier': 5.0},
     'баскет_любойгол':  {'values': [4, 5], 'multiplier': 2.5},
@@ -186,9 +188,21 @@ DART_2_BET_TYPES = {
 }
 
 BOWLING_BET_TYPES = {
+    # --- 1 бросок: против бота ---
     'боулинг_поражение': {'values': [], 'multiplier': 1.8, 'special': 'bowling_vs'},
     'боулинг_победа':    {'values': [], 'multiplier': 1.8, 'special': 'bowling_vs'},
-    'боулинг_страйк':    {'values': [6], 'multiplier': 5.7},
+    # --- 1 бросок: точный исход. Значения Telegram-эмодзи 🎳:
+    #     1 = промах (мимо всех кегль), 2 = сбита 1 кегля, 3 = 3 кегли,
+    #     4 = 4 кегли, 5 = 5 кеглей, 6 = страйк (все 6). 6 исходов по 1/6 -> x6. ---
+    'боулинг_промах':    {'values': [1], 'multiplier': 6.0},
+    'боулинг_1из6':      {'values': [2], 'multiplier': 6.0},
+    'боулинг_3из6':      {'values': [3], 'multiplier': 6.0},
+    'боулинг_4из6':      {'values': [4], 'multiplier': 6.0},
+    'боулинг_5из6':      {'values': [5], 'multiplier': 6.0},
+    'боулинг_страйк':    {'values': [6], 'multiplier': 6.0},
+    # --- 2 броска подряд (дубли, по аналогии с кубами) ---
+    'боулинг_любойдубль':      {'multiplier': 6.0,  'special': 'double_bowling_any_double'},
+    'боулинг_конкретныйдубль': {'multiplier': 36.0, 'special': 'double_bowling_specific_double'},
 }
 
 _BET_TYPE_DISPLAY_NAMES = {
@@ -231,6 +245,9 @@ BET_TYPE_TO_CODE = {
     'дартс2_дубльбелое': 'dt2_w', 'дартс2_дублькрасное': 'dt2_r',
     'дартс2_дубльцентр': 'dt2_c', 'дартс2_дубльмимо': 'dt2_m',
     'боулинг_поражение': 'bw_l', 'боулинг_победа': 'bw_w', 'боулинг_страйк': 'bw_s',
+    'боулинг_промах': 'bw_m', 'боулинг_1из6': 'bw_1', 'боулинг_3из6': 'bw_3',
+    'боулинг_4из6': 'bw_4', 'боулинг_5из6': 'bw_5',
+    'боулинг_любойдубль': 'bw_d', 'боулинг_конкретныйдубль': 'bw_sd',
 }
 CODE_TO_BET_TYPE = {v: k for k, v in BET_TYPE_TO_CODE.items()}
 
@@ -253,6 +270,9 @@ _OUTCOME_LABELS = {
     'дартс2_дубльбелое': 'Дубль белое', 'дартс2_дублькрасное': 'Дубль красное',
     'дартс2_дубльцентр': 'Дубль центр', 'дартс2_дубльмимо': 'Дубль мимо',
     'боулинг_поражение': 'Поражение', 'боулинг_победа': 'Победа', 'боулинг_страйк': 'Страйк',
+    'боулинг_промах': 'Промах', 'боулинг_1из6': 'Сбито 1/6', 'боулинг_3из6': 'Сбито 3/6',
+    'боулинг_4из6': 'Сбито 4/6', 'боулинг_5из6': 'Сбито 5/6',
+    'боулинг_любойдубль': 'Любой дубль',
 }
 
 # --- Автоматически строим "число -> название" для футбола из FOOTBALL_BET_TYPES,
@@ -274,6 +294,18 @@ for _bk_bt, _bk_cfg in BASKETBALL_BET_TYPES.items():
         _BASKETBALL_DOUBLE_TARGET_NAME[_bk_vals[0]] = _OUTCOME_LABELS.get(_bk_bt, _bk_bt)
 
 
+# --- Боулинг: "значение кубика -> название" для конкретных дублей (строится
+#     автоматически из BOWLING_BET_TYPES по исходам с одним значением). ---
+_BOWLING_DOUBLE_TARGET_NAME: Dict[int, str] = {}
+for _bw_bt, _bw_cfg in BOWLING_BET_TYPES.items():
+    _bw_vals = _bw_cfg.get('values')
+    if _bw_vals and len(_bw_vals) == 1:
+        _BOWLING_DOUBLE_TARGET_NAME[_bw_vals[0]] = _OUTCOME_LABELS.get(_bw_bt, _bw_bt)
+
+# Короткие названия для кнопок раздела «2 броска»
+_BOWLING_SHORT_NAME: Dict[int, str] = {1: 'Промах', 2: '1/6', 3: '3/6', 4: '4/6', 5: '5/6', 6: 'Страйк'}
+
+
 def _get_outcome_label(bet_type: str, bet_config: dict) -> str:
     if bet_type == 'куб2_конкретныйдубль':
         t = bet_config.get('target', 0)
@@ -285,6 +317,10 @@ def _get_outcome_label(bet_type: str, bet_config: dict) -> str:
     if bet_type == 'баскет_конкретныйдубль':
         t = bet_config.get('target', 0)
         name = _BASKETBALL_DOUBLE_TARGET_NAME.get(t, str(t))
+        return f'Дубль «{name}»'
+    if bet_type == 'боулинг_конкретныйдубль':
+        t = bet_config.get('target', 0)
+        name = _BOWLING_DOUBLE_TARGET_NAME.get(t, str(t))
         return f'Дубль «{name}»'
     if bet_type == 'куб3_конкретныйтрипл':
         t = bet_config.get('target', 0)
@@ -322,6 +358,8 @@ def _menu_key_for(bet_type: str) -> str:
         return 'football'
     elif bet_type.startswith('дартс_') or bet_type.startswith('дартс2_'):
         return 'darts'
+    elif bet_type in ('боулинг_любойдубль', 'боулинг_конкретныйдубль'):
+        return 'bowling2'
     elif bet_type.startswith('боулинг_'):
         return 'bowling'
     return 'dice1'
@@ -331,7 +369,7 @@ def _build_replay_keyboard(user_id: int, bet_type: str, amount: float, bet_confi
     code = BET_TYPE_TO_CODE.get(bet_type)
     if not code:
         return None
-    target = bet_config.get('target') if bet_type in ('куб2_конкретныйдубль', 'куб3_конкретныйтрипл', 'футбол_конкретныйдубль', 'баскет_конкретныйдубль') else None
+    target = bet_config.get('target') if bet_type in ('куб2_конкретныйдубль', 'куб3_конкретныйтрипл', 'футбол_конкретныйдубль', 'баскет_конкретныйдубль', 'боулинг_конкретныйдубль') else None
     target_str = str(target) if target is not None else ''
 
     def _cb(amt: float) -> str:
@@ -460,6 +498,21 @@ BET_TYPE_MAPPING = {
     'стр':    'боулинг_страйк',
 }
 
+# Текстовые названия исходов боулинга ("боулинг 1/6 0.5", "боулинг промах 1" и т.п.).
+# Проверяются раньше общего BET_TYPE_MAPPING, т.к. там "промах" относится к баскетболу.
+BOWLING_TEXT_ALIASES = {
+    'промах': 'боулинг_промах', 'мимо': 'боулинг_промах', 'miss': 'боулинг_промах',
+    '0/6': 'боулинг_промах', '0из6': 'боулинг_промах',
+    '1/6': 'боулинг_1из6', '1из6': 'боулинг_1из6', '1of6': 'боулинг_1из6',
+    '3/6': 'боулинг_3из6', '3из6': 'боулинг_3из6', '3of6': 'боулинг_3из6',
+    '4/6': 'боулинг_4из6', '4из6': 'боулинг_4из6', '4of6': 'боулинг_4из6',
+    '5/6': 'боулинг_5из6', '5из6': 'боулинг_5из6', '5of6': 'боулинг_5из6',
+    '6/6': 'боулинг_страйк', '6из6': 'боулинг_страйк',
+    'дубль': 'боулинг_любойдубль', 'любойдубль': 'боулинг_любойдубль',
+    'double': 'боулинг_любойдубль', 'anydouble': 'боулинг_любойдубль',
+}
+
+
 class BetStates(StatesGroup):
     waiting_for_amount = State()
 
@@ -471,31 +524,31 @@ class BettingGame:
         self.referral_system = None
         set_betting_game(self)
 
-    # Баланс хранится в USER_PROFILES внутри main.py (единое хранилище для
-    # профиля/статистики/админки и игр). Импорт отложенный (внутри методов),
-    # чтобы не создавать циклическую зависимость games.py <-> main.py при
-    # первом импорте модуля.
+    # Баланс хранится в storage.py (единое хранилище для профиля/статистики/
+    # админки и игр). storage.py не импортирует ни main.py, ни games.py, поэтому
+    # `from main import ...` здесь больше не нужен — он заново запускал main.py
+    # как отдельный модуль "main" и плодил второй словарь USER_PROFILES.
 
     @property
     def user_balances(self):
-        from main import USER_PROFILES
+        from storage import USER_PROFILES
         return {uid: d.get('balance', 0.0) for uid, d in USER_PROFILES.items()}
 
     def save_balances(self):
         pass
 
     def get_balance(self, user_id: int) -> float:
-        from main import get_profile_stats
+        from storage import get_profile_stats
         return get_profile_stats(user_id)["balance"]
 
     def add_balance(self, user_id: int, amount: float) -> float:
-        from main import get_profile_stats
+        from storage import get_profile_stats
         stats = get_profile_stats(user_id)
         stats["balance"] += amount
         return stats["balance"]
 
     def subtract_balance(self, user_id: int, amount: float) -> bool:
-        from main import get_profile_stats
+        from storage import get_profile_stats
         stats = get_profile_stats(user_id)
         if stats["balance"] < amount:
             return False
@@ -589,6 +642,8 @@ def parse_bet_command(text: str) -> Optional[Tuple[str, float]]:
             full_bet_type = 'дартс_мимо'
         else:
             full_bet_type = BET_TYPE_MAPPING.get(bet_type_key)
+    elif game_prefix == 'боулинг':
+        full_bet_type = BOWLING_TEXT_ALIASES.get(bet_type_key) or BET_TYPE_MAPPING.get(bet_type_key)
     else:
         full_bet_type = BET_TYPE_MAPPING.get(bet_type_key)
     if not full_bet_type:
@@ -671,7 +726,7 @@ def _apply_game_result(
     bet_type: str = '',
 ) -> float:
     game_name = _get_game_display_name(bet_type)
-    from main import log_game_round  # для топа игроков (оборот/выигрыши/кол-во игр)
+    from storage import log_game_round  # для топа игроков (оборот/выигрыши/кол-во игр)
 
     if is_win:
         gross_winnings = amount * bet_config['multiplier']
@@ -934,6 +989,61 @@ async def play_double_basketball_game(
     asyncio.create_task(_delayed_safe_reply(ball2, text, delay=3.0, reply_markup=keyboard))
 
 
+async def play_double_bowling_game(
+    chat_id: int,
+    user_id: int,
+    nickname: str,
+    amount: float,
+    bet_type: str,
+    bet_config: dict,
+    betting_game: BettingGame,
+    bet_msg: Message = None,
+):
+    """Два броска шара подряд. Дубль — оба броска дали один и тот же исход
+    (одинаковое значение 🎳): промах/1/3/4/5 кеглей/страйк.
+    'Любой дубль' — любое совпадение (x6), 'конкретный' — совпадение на выбранном исходе (x36)."""
+    send_kwargs = {'chat_id': chat_id, 'emoji': '🎳'}
+    if bet_msg:
+        send_kwargs['reply_to_message_id'] = bet_msg.message_id
+
+    roll1 = await betting_game.bot.send_dice(**send_kwargs)
+    await asyncio.sleep(2)
+
+    roll2_kwargs = {'chat_id': chat_id, 'emoji': '🎳'}
+    if bet_msg:
+        roll2_kwargs['reply_to_message_id'] = bet_msg.message_id
+    roll2 = await betting_game.bot.send_dice(**roll2_kwargs)
+
+    roll1_value = roll1.dice.value
+    roll2_value = roll2.dice.value
+    is_double = roll1_value == roll2_value
+
+    if bet_type == 'боулинг_любойдубль':
+        is_win = is_double
+    elif bet_type == 'боулинг_конкретныйдубль':
+        target = bet_config.get('target', 0)
+        is_win = is_double and roll1_value == target
+    else:
+        is_win = False
+
+    logging.info(
+        f"[dice_debug] emoji=🎳 bet_type={bet_type} values=({roll1_value}, {roll2_value}) "
+        f"target={bet_config.get('target')} is_win={is_win}"
+    )
+
+    winnings = _apply_game_result(
+        user_id, nickname, amount, is_win, bet_config, betting_game, bet_type=bet_type
+    )
+
+    outcome_label = _get_outcome_label(bet_type, bet_config)
+    text = (
+        _build_win_text(nickname, user_id, amount, outcome_label, winnings)
+        if is_win else _build_lose_text(nickname, user_id, amount, outcome_label)
+    )
+    keyboard = _build_replay_keyboard(user_id, bet_type, amount, bet_config)
+    asyncio.create_task(_delayed_safe_reply(roll2, text, delay=3.0, reply_markup=keyboard))
+
+
 async def play_double_darts_game(
     chat_id: int,
     user_id: int,
@@ -1149,6 +1259,8 @@ async def _run_game(
         await play_double_basketball_game(chat_id, user_id, nickname, amount, bet_type, bet_config, betting_game, bet_msg)
     elif bet_type.startswith('дартс2_'):
         await play_double_darts_game(chat_id, user_id, nickname, amount, bet_type, bet_config, betting_game, bet_msg)
+    elif bet_type in ('боулинг_любойдубль', 'боулинг_конкретныйдубль'):
+        await play_double_bowling_game(chat_id, user_id, nickname, amount, bet_type, bet_config, betting_game, bet_msg)
     elif bet_type.startswith('боулинг_') and bet_config.get('special') == 'bowling_vs':
         await play_bowling_vs_game(chat_id, user_id, nickname, amount, bet_type, bet_config, betting_game, bet_msg)
     else:
@@ -1229,6 +1341,8 @@ async def handle_replay_bet(callback: CallbackQuery, state: FSMContext):
 
     if target_str:
         try:
+            # копия, чтобы не менять общий конфиг ставки (им могут пользоваться другие игроки)
+            bet_config = dict(bet_config)
             bet_config['target'] = int(target_str)
         except ValueError:
             pass
@@ -1298,6 +1412,7 @@ async def handle_back_to_menu(callback: CallbackQuery, state: FSMContext):
         'football':   show_football_menu,
         'darts':      show_darts_menu,
         'bowling':    show_bowling_menu,
+        'bowling2':   show_bowling2_menu,
     }.get(menu_key)
 
     if handler:
@@ -1782,33 +1897,92 @@ async def show_darts_menu(callback: CallbackQuery, betting_game: 'BettingGame' =
     await callback.answer()
 
 
-def _build_bowling_menu_content(betting_game: 'BettingGame' = None, user_id: int = 0):
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        _tabs_row('bowling'),
-        [
-            InlineKeyboardButton(text="Победа (x1.8)", callback_data="bet_bowling_боулинг_победа"),
-            InlineKeyboardButton(text="Поражение (x1.8)", callback_data="bet_bowling_боулинг_поражение")
-        ],
-        [
-            InlineKeyboardButton(text="Страйк (x5.7)", callback_data="bet_bowling_боулинг_страйк")
-        ],
-        [
-            InlineKeyboardButton(text="Назад", callback_data="games", icon_custom_emoji_id=EMOJI_BACK)
+# --- РАЗДЕЛЫ ДЛЯ БОУЛИНГА (как в кубике: «1 бросок» / «2 броска» наверху) ---
+BOWLING_TAB_ORDER = ['1бросок', '2броска']
+
+BOWLING_TAB_EMOJI = {
+    '1бросок': '🎳',
+    '2броска': '🎳🎳',
+}
+
+BOWLING_TAB_LABEL = {
+    '1бросок': '1 бросок',
+    '2броска': '2 броска',
+}
+
+BOWLING_TAB_TITLE = {
+    '1бросок': 'Боулинг · 1 бросок',
+    '2броска': 'Боулинг · 2 броска',
+}
+
+
+def _bowling_tabs_row(active: str) -> list:
+    row = []
+    for key in BOWLING_TAB_ORDER:
+        label = BOWLING_TAB_LABEL[key]
+        text = f"· {label} ·" if key == active else label
+        row.append(InlineKeyboardButton(text=text, callback_data=f"btabs_{key}"))
+    return row
+
+
+def _bowling_outcome_rows(active: str) -> list:
+    def btn(text: str, bet_type: str, target: Optional[int] = None) -> InlineKeyboardButton:
+        # множитель берём из BOWLING_BET_TYPES, чтобы кнопки не расходились с конфигом
+        mult = _fmt_mult(BOWLING_BET_TYPES[bet_type]['multiplier'])
+        cb = f"bet_bowling_{bet_type}" + (f"_{target}" if target is not None else "")
+        return InlineKeyboardButton(text=f"{text} (x{mult})", callback_data=cb)
+
+    if active == '2броска':
+        return [
+            [btn("Любой дубль", 'боулинг_любойдубль')],
+            [btn(f"2× {_BOWLING_SHORT_NAME[v]}", 'боулинг_конкретныйдубль', v) for v in (1, 2, 3)],
+            [btn(f"2× {_BOWLING_SHORT_NAME[v]}", 'боулинг_конкретныйдубль', v) for v in (4, 5, 6)],
         ]
+    # '1бросок'
+    return [
+        [btn("Победа", 'боулинг_победа'), btn("Поражение", 'боулинг_поражение')],
+        [btn("Промах", 'боулинг_промах'), btn("Страйк", 'боулинг_страйк')],
+        [btn("Сбито 1/6", 'боулинг_1из6'), btn("Сбито 3/6", 'боулинг_3из6')],
+        [btn("Сбито 4/6", 'боулинг_4из6'), btn("Сбито 5/6", 'боулинг_5из6')],
+    ]
+
+
+def _build_bowling_menu_content(betting_game: 'BettingGame' = None, user_id: int = 0, active: str = '1бросок'):
+    if active not in BOWLING_TAB_ORDER:
+        active = '1бросок'
+    rows = [_tabs_row('bowling'), _bowling_tabs_row(active)]
+    rows.extend(_bowling_outcome_rows(active))
+    rows.append([
+        InlineKeyboardButton(text="Назад", callback_data="games", icon_custom_emoji_id=EMOJI_BACK)
     ])
+    markup = InlineKeyboardMarkup(inline_keyboard=rows)
     header = _bet_balance_block(betting_game, user_id) if betting_game else ""
     text = (
-        f"<blockquote><b>🎳 Боулинг</b></blockquote>\n\n"
+        f"<blockquote><b>{BOWLING_TAB_EMOJI[active]} {BOWLING_TAB_TITLE[active]}</b></blockquote>\n\n"
         f"{header}"
         f"<blockquote><b><i>Выберите исход:</i></b></blockquote>\n\n"
     )
     return text, markup
 
 
-async def show_bowling_menu(callback: CallbackQuery, betting_game: 'BettingGame' = None):
-    text, markup = _build_bowling_menu_content(betting_game, callback.from_user.id)
+async def show_bowling_menu(callback: CallbackQuery, betting_game: 'BettingGame' = None, active: str = '1бросок'):
+    text, markup = _build_bowling_menu_content(betting_game, callback.from_user.id, active)
     await safe_edit_message(callback, text, reply_markup=markup, parse_mode='HTML')
     await callback.answer()
+
+
+async def show_bowling2_menu(callback: CallbackQuery, betting_game: 'BettingGame' = None):
+    """Возврат сразу в раздел «2 броска» (кнопка «Изменить исход» после дубля)."""
+    await show_bowling_menu(callback, betting_game, active='2броска')
+
+
+@router.callback_query(F.data.startswith("btabs_"))
+async def bowling_tab_switch(callback: CallbackQuery, state: FSMContext):
+    betting_game = get_betting_game()
+    active = callback.data.split("_", 1)[1]
+    if active not in BOWLING_TAB_ORDER:
+        active = '1бросок'
+    await show_bowling_menu(callback, betting_game, active)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1892,6 +2066,12 @@ async def request_amount(callback: CallbackQuery, state: FSMContext, betting_gam
     elif data.startswith("bet_basketball_баскет_конкретныйдубль_"):
         target = int(data.split("_")[-1])
         bet_type = "баскет_конкретныйдубль"
+        bet_config = betting_game.get_bet_config(bet_type)
+        if bet_config:
+            bet_config['target'] = target
+    elif data.startswith("bet_bowling_боулинг_конкретныйдубль_"):
+        target = int(data.split("_")[-1])
+        bet_type = "боулинг_конкретныйдубль"
         bet_config = betting_game.get_bet_config(bet_type)
         if bet_config:
             bet_config['target'] = target
