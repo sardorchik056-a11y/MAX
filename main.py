@@ -1898,6 +1898,7 @@ async def on_startup(bot: Bot) -> None:
     global BOT_USERNAME
     me = await bot.get_me()
     BOT_USERNAME = me.username
+    logging.info("Бот запущен как @%s (id=%s)", me.username, me.id)
 
     # Фоновая проверка оплаты счетов CryptoBot / xRocket
     payments_module.start_watchers(bot)
@@ -1907,17 +1908,30 @@ async def on_startup(bot: Bot) -> None:
             "Не задан внешний адрес сервиса: нет ни RENDER_EXTERNAL_URL (Render выставляет "
             "его сам для web-сервисов), ни WEBHOOK_HOST в переменных окружения."
         )
-    await bot.set_webhook(
+    ok = await bot.set_webhook(
         WEBHOOK_URL,
         secret_token=WEBHOOK_SECRET,
         drop_pending_updates=True,
     )
-    logging.info("Вебхук установлен: %s", WEBHOOK_URL)
+    logging.info("set_webhook() вернул: %r, URL: %s", ok, WEBHOOK_URL)
+
+    # Самопроверка: сразу спрашиваем у Telegram, что реально записалось —
+    # чтобы в логах Render было видно, приняли ли вебхук на самом деле.
+    info = await bot.get_webhook_info()
+    logging.info(
+        "get_webhook_info() сразу после установки: url=%r pending=%s last_error=%r",
+        info.url, info.pending_update_count, info.last_error_message,
+    )
 
 
 async def on_shutdown(bot: Bot) -> None:
+    # ВАЖНО: НЕ удаляем вебхук здесь. Render деплоит с нулевым даунтаймом —
+    # новый процесс уже поставил свой вебхук и живёт, а этот shutdown-хук
+    # старого процесса срабатывает уже ПОСЛЕ этого. bot.delete_webhook() тут
+    # снёс бы только что установленный вебхук нового инстанса — апдейты
+    # переставали бы доставляться до следующего деплоя. Просто гасим фоновые
+    # задачи этого (умирающего) процесса.
     await payments_module.stop_watchers()
-    await bot.delete_webhook()
 
 
 async def health_check(request: web.Request) -> web.Response:
