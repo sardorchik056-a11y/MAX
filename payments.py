@@ -10,6 +10,16 @@ payments.py — пополнение баланса через CryptoBot (Crypto
        в storage.py пишется транзакция "deposit" — она автоматически попадает в
        «Всего депозитов» профиля, статистику по периодам и условия чеков.
 
+Вывод средств (кнопка «Вывести» в профиле):
+
+    1. Игрок выбирает способ (CryptoBot / xRocket) и сумму, подтверждает вывод.
+    2. Баланс списывается (транзакция "withdraw"), затем бот отправляет USDT на
+       Telegram-аккаунт игрока через API провайдера (CryptoBot: transfer, xRocket: payouts).
+    3. Любая ошибка -> игроку пишем «Обратитесь в поддержку» (+ кнопка «Поддержка»);
+       если провайдер ТОЧНО отказал — деньги возвращаются на баланс, если результат
+       неизвестен (таймаут/5xx) — НЕ возвращаются, заявка уходит на ручную проверку
+       (status = 'review'), админам приходит уведомление.
+
 Документация:
     CryptoBot: https://help.send.tg/en/articles/10279948-crypto-pay-api
     xRocket:   https://docs.xrocket.exchange/api/pay/pay-api-overview
@@ -20,6 +30,7 @@ payments.py — пополнение баланса через CryptoBot (Crypto
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import logging
 import re
@@ -55,8 +66,8 @@ from storage import adjust_balance, get_profile_stats
 #              (тестовая сеть: @xrocket_testnet_bot)
 #
 # Пустая строка = провайдер отключён (кнопка покажет «временно недоступен»).
-CRYPTOBOT_TOKEN = "582363:AALEf7JOugnrQyrkMHzH5UrO7pdOjjYnTQy"   # <- вставьте API Token из @CryptoBot
-XROCKET_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhcHBJZCI6IjMwMDgzMiIsImp0aSI6ImFwcDozMDA4MzI6ZTM5MDM0ZmMtMWU2MC00MjdjLWEzNjktOWU2ZDI3YzQ3YWI0IiwiaWF0IjoxNzg5ODAxMjcwfQ.ZD9DA2KUtwes2rDwKEreoRzUuRSqw_0hB9kQWgM_7c0"     # <- вставьте API Token из @xRocket
+CRYPTOBOT_TOKEN = ""   # <- вставьте API Token из @CryptoBot
+XROCKET_TOKEN = ""     # <- вставьте API Token из @xRocket
 
 CRYPTOBOT_TESTNET = False
 XROCKET_TESTNET = False
@@ -64,6 +75,25 @@ XROCKET_TESTNET = False
 MIN_DEPOSIT_USD = 1.0
 MAX_DEPOSIT_USD = 10000.0
 QUICK_AMOUNTS = (1, 5, 10, 25, 50, 100)
+
+# --- Вывод средств ---
+MIN_WITHDRAW_USD = 1.0
+MAX_WITHDRAW_USD = 10000.0
+WITHDRAW_QUICK_AMOUNTS = (5, 10, 25, 50, 100)
+WITHDRAW_ASSET = "USDT"                # в чём отправляем (1 USDT ≈ 1 USD)
+SUPPORT_HANDLE = "@luckydicesupport"   # тот же, что в SUPPORT_TEXT в main.py
+WITHDRAW_POLL_SECONDS = 8              # как часто проверять «висящие» выводы
+PENDING_WITHDRAW_ALERT_SECONDS = 60 * 60   # xRocket держит выплату в pending дольше часа -> на ручную проверку
+STALE_PROCESSING_SECONDS = 5 * 60      # заявка застряла в processing (например, бот упал) -> на ручную проверку
+
+# Типы транзакций в storage.adjust_balance(user_id, amount, kind):
+#   списание при выводе — "withdraw" (её суммирует «Всего выводов» в main.py);
+#   возврат при неудачном выводе — "admin_grant" (заведомо начисляет и не попадает в депозиты).
+WITHDRAW_DEBIT_KIND = "withdraw"
+WITHDRAW_REFUND_KIND = "admin_grant"
+
+# Кому слать уведомления о сбоях выводов. Заполняется из main.py (ADMIN_IDS).
+ALERT_ADMIN_IDS: set[int] = set()
 
 INVOICE_TTL_SECONDS = 30 * 60          # счёт живёт 30 минут
 EXPIRE_GRACE_SECONDS = 10 * 60         # после этого без оплаты считаем счёт закрытым
@@ -84,6 +114,8 @@ EMOJI_CRYPTOBOT = "5798650400189980129"    # 💵 CryptoBot
 EMOJI_XROCKET = "5798534328698805312"      # 🚀 xRocket
 EMOJI_PAY = "5836907383292436018"          # 💎 кнопка «Оплатить»
 EMOJI_CHECK = "6039859895291877126"        # 💎 кнопка «Проверить оплату»
+EMOJI_WITHDRAW = "5890848474563352982"     # 🪙 как «Вывести» в профиле
+EMOJI_SUPPORT = "5812150667812280629"      # 🛠 как «Поддержка» в main.py
 
 log = logging.getLogger("payments")
 
@@ -96,9 +128,12 @@ log = logging.getLogger("payments")
 class PaymentError(Exception):
     """Ошибка платёжного провайдера. Текст можно показывать пользователю."""
 
-    def __init__(self, message: str, retry_after: float | None = None):
+    def __init__(self, message: str, retry_after: float | None = None, ambiguous: bool = False):
         super().__init__(message)
         self.retry_after = retry_after
+        # ambiguous=True — неизвестно, выполнил ли провайдер операцию (таймаут, обрыв связи, 5xx).
+        # При выводе такую ошибку нельзя «лечить» возвратом денег: перевод мог уйти.
+        self.ambiguous = ambiguous
 
 
 _session: aiohttp.ClientSession | None = None
@@ -117,12 +152,19 @@ class ProviderInvoice:
     pay_url: str
 
 
+@dataclass
+class ProviderPayout:
+    ref: str
+    status: str  # paid | pending | failed
+
+
 def _tge(emoji_id: str, fallback: str) -> str:
     """Кастомный эмодзи для текста сообщения (parse_mode=HTML)."""
     return f'<tg-emoji emoji-id="{emoji_id}">{fallback}</tg-emoji>'
 
 
 DEPOSIT_ICON = _tge(EMOJI_DEPOSIT, "🏧")
+WITHDRAW_ICON = _tge(EMOJI_WITHDRAW, "🪙")
 
 
 def _normalize_status(raw: str | None) -> str:
@@ -131,6 +173,15 @@ def _normalize_status(raw: str | None) -> str:
         return "paid"
     if raw in ("expired", "cancelled"):
         return "expired"
+    return "pending"
+
+
+def _normalize_payout_status(raw: str | None) -> str:
+    """Статусы выплат xRocket -> paid / failed / pending."""
+    if raw == "finished":
+        return "paid"
+    if raw == "failed":
+        return "failed"
     return "pending"
 
 
@@ -162,14 +213,17 @@ class CryptoBotClient:
                 json=params or {},
                 headers={"Crypto-Pay-API-Token": self.token},
             ) as resp:
+                http_status = resp.status
                 data = await resp.json(content_type=None)
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as ex:
-            raise PaymentError(f"CryptoBot недоступен: {ex}") from ex
+            raise PaymentError(f"CryptoBot недоступен: {ex}", ambiguous=True) from ex
 
         if not isinstance(data, dict) or not data.get("ok"):
             error = data.get("error") if isinstance(data, dict) else None
             name = error.get("name") if isinstance(error, dict) else error
-            raise PaymentError(f"CryptoBot: {name or 'неизвестная ошибка'}")
+            # 5xx или мусор вместо JSON — неизвестно, дошёл ли запрос до исполнения
+            ambiguous = http_status >= 500 or not isinstance(data, dict)
+            raise PaymentError(f"CryptoBot: {name or 'неизвестная ошибка'}", ambiguous=ambiguous)
         return data["result"]
 
     async def create_invoice(self, amount_usd: float, client_id: str, description: str) -> ProviderInvoice:
@@ -204,6 +258,26 @@ class CryptoBotClient:
     async def get_status(self, invoice_id: str) -> str | None:
         return (await self.get_statuses([invoice_id])).get(invoice_id)
 
+    async def transfer(self, tg_user_id: int, amount_usd: float, spend_id: str) -> ProviderPayout:
+        """Отправка USDT на аккаунт игрока в CryptoBot (метод transfer).
+
+        Нужно один раз включить в @CryptoBot -> Crypto Pay -> My Apps -> ваше приложение ->
+        Security -> Transfers -> Enable. Игрок должен хотя бы раз запускать @CryptoBot.
+        spend_id — идемпотентность (один spend_id принимается только один раз)."""
+        result = await self._call(
+            "transfer",
+            {
+                "user_id": tg_user_id,
+                "asset": WITHDRAW_ASSET,
+                "amount": f"{amount_usd:.2f}",
+                "spend_id": spend_id,
+                "comment": "Вывод средств",
+            },
+        )
+        if not isinstance(result, dict) or result.get("status") not in (None, "completed"):
+            raise PaymentError("CryptoBot: неожиданный ответ на перевод", ambiguous=True)
+        return ProviderPayout(str(result.get("transfer_id") or spend_id), "paid")
+
 
 # --------------------------------------------------------------------------
 # xRocket — Pay API (Bearer-токен)
@@ -223,6 +297,8 @@ class XRocketClient:
         # лимит xRocket — 20 запросов/мин на эндпоинт: все GET /invoice идут через этот «пропуск»
         self._gap_lock = asyncio.Lock()
         self._last_get = 0.0
+        self._pgap_lock = asyncio.Lock()   # то же для GET /payout
+        self._last_pget = 0.0
 
     @property
     def configured(self) -> bool:
@@ -242,7 +318,7 @@ class XRocketClient:
                 status = resp.status
                 retry_after = resp.headers.get("Retry-After")
         except (aiohttp.ClientError, asyncio.TimeoutError) as ex:
-            raise PaymentError(f"xRocket недоступен: {ex}") from ex
+            raise PaymentError(f"xRocket недоступен: {ex}", ambiguous=True) from ex
 
         try:
             data = json.loads(text) if text else None
@@ -257,7 +333,8 @@ class XRocketClient:
                 raise PaymentError("xRocket: токен недействителен (нужен Bearer-токен Pay API)")
             if status == 429:
                 raise PaymentError("xRocket: слишком много запросов", retry_after=float(retry_after or 10))
-            raise PaymentError(f"xRocket: {problem or status} {detail}".strip())
+            # 5xx — неизвестно, выполнилась ли операция; 4xx — запрос точно отклонён
+            raise PaymentError(f"xRocket: {problem or status} {detail}".strip(), ambiguous=status >= 500)
         return data
 
     async def create_invoice(self, amount_usd: float, client_id: str, description: str) -> ProviderInvoice:
@@ -290,6 +367,35 @@ class XRocketClient:
             self._last_get = time.monotonic()
         data = await self._call("GET", "/api/v1/invoice", params={"invoiceId": invoice_id})
         return _normalize_status(data.get("status")) if isinstance(data, dict) else None
+
+    async def transfer(self, tg_user_id: int, amount_usd: float, client_payout_id: str) -> ProviderPayout:
+        """Выплата USDT на Telegram-аккаунт игрока (Pay API: POST /api/v1/payouts).
+        clientPayoutId — наш id, по нему выплату можно сверить при таймауте.
+        Игрок должен хотя бы раз запускать @xRocket."""
+        data = await self._call(
+            "POST",
+            "/api/v1/payouts",
+            body={
+                "clientPayoutId": client_payout_id,
+                "target": str(tg_user_id),
+                "targetType": "telegram_user_id",
+                "asset": WITHDRAW_ASSET,
+                "amount": f"{amount_usd:.2f}",
+            },
+        )
+        if not isinstance(data, dict) or not data.get("payoutId"):
+            raise PaymentError("xRocket: неожиданный ответ на выплату", ambiguous=True)
+        return ProviderPayout(str(data["payoutId"]), _normalize_payout_status(data.get("status")))
+
+    async def get_payout_status(self, payout_id: str) -> str | None:
+        """paid / failed / pending для выплаты по payoutId."""
+        async with self._pgap_lock:
+            wait = XROCKET_MIN_GAP_SECONDS - (time.monotonic() - self._last_pget)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_pget = time.monotonic()
+        data = await self._call("GET", "/api/v1/payout", params={"payoutId": payout_id})
+        return _normalize_payout_status(data.get("status")) if isinstance(data, dict) else None
 
 
 cryptobot = CryptoBotClient(CRYPTOBOT_TOKEN, CRYPTOBOT_TESTNET)
@@ -332,6 +438,22 @@ def _db_init() -> None:
                 paid_at     REAL,
                 last_check  REAL    NOT NULL DEFAULT 0,
                 UNIQUE (provider, invoice_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS withdrawals (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider     TEXT    NOT NULL,
+                client_id    TEXT    NOT NULL UNIQUE,
+                user_id      INTEGER NOT NULL,
+                amount       REAL    NOT NULL,
+                status       TEXT    NOT NULL DEFAULT 'processing',
+                provider_ref TEXT,
+                error        TEXT,
+                created_at   REAL    NOT NULL,
+                updated_at   REAL    NOT NULL
             )
             """
         )
@@ -396,6 +518,59 @@ def _db_mark_expired(dep_id: int) -> bool:
     with closing(_conn()) as conn, conn:
         cur = conn.execute("UPDATE deposits SET status = 'expired' WHERE id = ? AND status = 'pending'", (dep_id,))
         return cur.rowcount == 1
+
+
+# Статусы вывода: processing -> paid | pending -> paid | failed | review
+#   processing — идёт (баланс списан, запрос провайдеру отправляется)
+#   pending    — провайдер принял выплату, но ещё не завершил (xRocket)
+#   paid       — деньги отправлены
+#   failed     — провайдер точно отказал, деньги возвращены на баланс
+#   review     — результат неизвестен (таймаут/5xx/сбой) — разбирается вручную, автоматически НЕ возвращаем
+
+
+def _wd_insert(provider: str, client_id: str, user_id: int, amount: float) -> int:
+    now = time.time()
+    with closing(_conn()) as conn, conn:
+        cur = conn.execute(
+            "INSERT INTO withdrawals (provider, client_id, user_id, amount, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (provider, client_id, user_id, amount, now, now),
+        )
+        return int(cur.lastrowid)
+
+
+def _wd_move(wd_id: int, from_statuses: tuple[str, ...], to_status: str,
+             ref: str | None = None, error: str | None = None) -> bool:
+    """Атомарный переход статуса. True получит только один вызывающий —
+    так бот и фоновая проверка не смогут, например, дважды вернуть деньги."""
+    marks = ",".join("?" * len(from_statuses))
+    with closing(_conn()) as conn, conn:
+        cur = conn.execute(
+            "UPDATE withdrawals SET status = ?, provider_ref = COALESCE(?, provider_ref), "
+            f"error = COALESCE(?, error), updated_at = ? WHERE id = ? AND status IN ({marks})",
+            (to_status, ref, error, time.time(), wd_id, *from_statuses),
+        )
+        return cur.rowcount == 1
+
+
+def _wd_active_count(user_id: int) -> int:
+    with closing(_conn()) as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM withdrawals WHERE user_id = ? AND "
+            "(status = 'pending' OR (status = 'processing' AND created_at > ?))",
+            (user_id, time.time() - STALE_PROCESSING_SECONDS),
+        ).fetchone()
+        return int(row[0])
+
+
+def _wd_list(status: str, provider: str | None = None) -> list[sqlite3.Row]:
+    query = "SELECT * FROM withdrawals WHERE status = ?"
+    args: tuple = (status,)
+    if provider:
+        query += " AND provider = ?"
+        args = (status, provider)
+    with closing(_conn()) as conn:
+        return conn.execute(query + " ORDER BY id ASC", args).fetchall()
 
 
 async def _run(fn, *args):
@@ -483,6 +658,203 @@ async def check_deposit(bot: Bot, dep_id: int) -> str:
 
 
 # --------------------------------------------------------------------------
+# Вывод средств
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class WithdrawResult:
+    status: str          # paid | pending | failed | review | rejected
+    text: str            # rejected — обычный текст для alert; остальные — HTML для сообщения
+    wd_id: int | None = None
+
+
+def _rejected(text: str) -> WithdrawResult:
+    return WithdrawResult("rejected", text)
+
+
+def _support_hint(wd_id: int | None) -> str:
+    ref = f" Номер заявки: <b>#{wd_id}</b>." if wd_id else ""
+    return f"Обратитесь в поддержку: <b>{SUPPORT_HANDLE}</b>.{ref}"
+
+
+def _error_text(title: str, wd_id: int | None, note: str = "") -> str:
+    note_part = f"{note}\n\n" if note else ""
+    return f"{WITHDRAW_ICON} <b>{title}</b>\n\n{note_part}{_support_hint(wd_id)}"
+
+
+def _paid_text(provider: CryptoBotClient | XRocketClient, user_id: int, amount: float) -> str:
+    return (
+        f"{WITHDRAW_ICON} <b>Вывод выполнен</b>\n\n"
+        f"┌ Способ: <b>{_provider_label(provider)}</b>\n"
+        f"├ Сумма: <b>{_fmt_usd(amount)}</b>\n"
+        f"└ Баланс: <b>{_fmt_usd(get_profile_stats(user_id)['balance'])}</b>\n\n"
+        f"<i>Средства отправлены на ваш аккаунт в {provider.title}.</i>"
+    )
+
+
+async def _alert_admins(bot: Bot, text: str) -> None:
+    """Сообщаем админам о сбое вывода (текст — уже безопасный HTML)."""
+    for admin_id in ALERT_ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, f"<b>[Вывод]</b> {text}")
+        except Exception as ex:
+            log.warning("[withdraw] не удалось уведомить админа %s: %s", admin_id, ex)
+
+
+def _debit_balance(user_id: int, amount: float) -> bool:
+    """Списывает баланс и проверяет, что он ДЕЙСТВИТЕЛЬНО уменьшился на amount.
+    Защита от неверного знака/типа транзакции в storage.py: если списание не сработало,
+    платёж провайдеру не отправляется."""
+    before = get_profile_stats(user_id)["balance"]
+    after = adjust_balance(user_id, amount, WITHDRAW_DEBIT_KIND)
+    if abs(after - (before - amount)) <= 0.005:
+        return True
+    log.critical(
+        "[withdraw] списание не сработало: user=%s было=%.2f стало=%.2f сумма=%.2f kind=%s",
+        user_id, before, after, amount, WITHDRAW_DEBIT_KIND,
+    )
+    if after > before + 0.005:  # storage приплюсовал вместо списания — откатываем
+        try:
+            adjust_balance(user_id, amount, "admin_deduct")
+        except Exception:
+            log.exception("[withdraw] не удалось откатить ошибочное начисление user=%s", user_id)
+    return False
+
+
+def _refund_balance(user_id: int, amount: float) -> bool:
+    try:
+        adjust_balance(user_id, amount, WITHDRAW_REFUND_KIND)
+        return True
+    except Exception:
+        log.critical("[withdraw] НЕ УДАЛОСЬ вернуть %.2f USD пользователю %s", amount, user_id, exc_info=True)
+        return False
+
+
+async def _fail_and_refund(bot: Bot, wd_id: int, user_id: int, amount: float, reason: str) -> WithdrawResult:
+    """Провайдер ТОЧНО отказал: переводим заявку в failed и возвращаем деньги (один раз)."""
+    moved = await _run(_wd_move, wd_id, ("processing", "pending"), "failed", None, reason)
+    refunded = True
+    if moved:
+        refunded = _refund_balance(user_id, amount)
+        if not refunded:
+            await _run(_wd_move, wd_id, ("failed",), "review")
+    log.error("[withdraw] #%s user=%s %.2f USD не выполнен: %s (возврат: %s)", wd_id, user_id, amount, reason, refunded)
+    await _alert_admins(
+        bot,
+        f"#{wd_id} user=<code>{user_id}</code> ${amount:.2f} — ошибка: <code>{html.escape(reason)}</code>. "
+        + ("Деньги возвращены на баланс." if refunded else "<b>Деньги НЕ возвращены — нужен ручной разбор!</b>"),
+    )
+    if refunded:
+        return WithdrawResult(
+            "failed", _error_text("Не удалось выполнить вывод", wd_id, "Средства возвращены на баланс."), wd_id
+        )
+    return WithdrawResult(
+        "review",
+        _error_text("Не удалось выполнить вывод", wd_id, "Заявка передана на проверку — мы разберёмся вручную."),
+        wd_id,
+    )
+
+
+_wd_locks: dict[int, asyncio.Lock] = {}
+
+
+async def _execute_withdrawal(bot: Bot, user_id: int, provider_key: str, amount: float) -> WithdrawResult:
+    """Весь вывод целиком. Порядок важен: заявка в БД -> списание баланса -> запрос провайдеру.
+    Любое исключение здесь превращается в результат с текстом «обратитесь в поддержку»."""
+    provider = PROVIDERS.get(provider_key)
+    if provider is None:
+        return _rejected("Неизвестный способ вывода")
+    if not provider.configured:
+        return _rejected(f"{provider.title} временно недоступен")
+    if not MIN_WITHDRAW_USD <= amount <= MAX_WITHDRAW_USD:
+        return _rejected(f"Сумма вывода должна быть от {MIN_WITHDRAW_USD:g}$ до {MAX_WITHDRAW_USD:g}$")
+
+    lock = _wd_locks.setdefault(user_id, asyncio.Lock())
+    if lock.locked():
+        return _rejected("Предыдущий вывод ещё обрабатывается")
+
+    async with lock:
+        wd_id: int | None = None
+        debited = False
+        try:
+            if await _run(_wd_active_count, user_id):
+                return _rejected("У вас уже есть вывод в обработке. Дождитесь его завершения.")
+            balance = get_profile_stats(user_id)["balance"]
+            if balance + 0.005 < amount:
+                return _rejected(f"Недостаточно средств. Доступно: {_fmt_usd(balance)}")
+
+            client_id = f"wd_{uuid.uuid4().hex}"   # он же spend_id / clientPayoutId (идемпотентность)
+            wd_id = await _run(_wd_insert, provider_key, client_id, user_id, amount)
+
+            debited = _debit_balance(user_id, amount)
+            if not debited:
+                await _run(_wd_move, wd_id, ("processing",), "failed", None, "debit_mismatch")
+                await _alert_admins(
+                    bot,
+                    f"#{wd_id} user=<code>{user_id}</code> — списание баланса не сработало "
+                    f"(тип «{WITHDRAW_DEBIT_KIND}» в storage.py). Платёж НЕ отправлялся.",
+                )
+                return WithdrawResult("failed", _error_text("Не удалось выполнить вывод", wd_id), wd_id)
+
+            try:
+                payout = await provider.transfer(user_id, amount, client_id)
+            except PaymentError as ex:
+                if ex.ambiguous:
+                    # перевод мог уйти — деньги НЕ возвращаем, разбираем вручную
+                    await _run(_wd_move, wd_id, ("processing",), "review", None, str(ex))
+                    log.error("[withdraw] #%s user=%s результат неизвестен: %s", wd_id, user_id, ex)
+                    await _alert_admins(
+                        bot,
+                        f"#{wd_id} user=<code>{user_id}</code> ${amount:.2f} через {provider.title} — "
+                        f"результат неизвестен (<code>{html.escape(str(ex))}</code>). Баланс списан, "
+                        f"деньги не возвращались. Сверьте выплату в {provider.title} по id "
+                        f"<code>{client_id}</code>.",
+                    )
+                    return WithdrawResult(
+                        "review",
+                        _error_text(
+                            "Не удалось подтвердить вывод", wd_id,
+                            "Статус выплаты уточняется — проверим вручную.",
+                        ),
+                        wd_id,
+                    )
+                return await _fail_and_refund(bot, wd_id, user_id, amount, str(ex))
+
+            if payout.status == "failed":
+                return await _fail_and_refund(bot, wd_id, user_id, amount, "provider status: failed")
+            if payout.status == "paid":
+                await _run(_wd_move, wd_id, ("processing",), "paid", payout.ref)
+                log.info("[withdraw] #%s user=%s provider=%s -%.2f USD", wd_id, user_id, provider_key, amount)
+                return WithdrawResult("paid", _paid_text(provider, user_id, amount), wd_id)
+
+            await _run(_wd_move, wd_id, ("processing",), "pending", payout.ref)
+            return WithdrawResult(
+                "pending",
+                f"{WITHDRAW_ICON} <b>Вывод обрабатывается</b>\n\n"
+                f"┌ Способ: <b>{_provider_label(provider)}</b>\n"
+                f"└ Сумма: <b>{_fmt_usd(amount)}</b>\n\n"
+                "<i>Как только выплата завершится, пришлём уведомление. "
+                f"Если этого не произошло в течение часа — обратитесь в поддержку {SUPPORT_HANDLE}.</i>",
+                wd_id,
+            )
+        except Exception as ex:
+            log.exception("[withdraw] неожиданная ошибка user=%s provider=%s amount=%s", user_id, provider_key, amount)
+            if wd_id is not None:
+                try:
+                    # если баланс уже списан — результат неизвестен (review), иначе деньги не тронуты
+                    await _run(_wd_move, wd_id, ("processing",), "review" if debited else "failed", None, f"internal: {ex!r}")
+                except Exception:
+                    log.exception("[withdraw] не удалось обновить заявку #%s", wd_id)
+            await _alert_admins(
+                bot,
+                f"#{wd_id or '—'} user=<code>{user_id}</code> ${amount:.2f} — внутренняя ошибка: "
+                f"<code>{html.escape(repr(ex))}</code>. Баланс списан: {'да' if debited else 'нет'}.",
+            )
+            return WithdrawResult("review" if debited else "failed", _error_text("Не удалось выполнить вывод", wd_id), wd_id)
+
+
+# --------------------------------------------------------------------------
 # Фоновые проверки
 # --------------------------------------------------------------------------
 
@@ -530,6 +902,49 @@ async def _watch_xrocket(bot: Bot) -> None:
             await asyncio.sleep(5)
 
 
+async def _watch_withdrawals(bot: Bot) -> None:
+    """Доводит до конца выводы, которые не завершились сразу:
+    xRocket pending -> paid/failed; застрявшие processing/долгие pending -> review + уведомление админам."""
+    while True:
+        try:
+            now = time.time()
+            for row in await _run(_wd_list, "processing"):
+                if now - row["created_at"] > STALE_PROCESSING_SECONDS:
+                    if await _run(_wd_move, row["id"], ("processing",), "review", None, "stale processing"):
+                        log.error("[withdraw] #%s застряла в processing", row["id"])
+                        await _alert_admins(
+                            bot,
+                            f"#{row['id']} user=<code>{row['user_id']}</code> ${row['amount']:.2f} — заявка "
+                            f"застряла (бот перезапускался?). Баланс мог быть списан, платёж мог не уйти — "
+                            f"проверьте вручную (id <code>{row['client_id']}</code>).",
+                        )
+
+            if xrocket.configured:
+                for row in await _run(_wd_list, "pending", "xrocket"):
+                    status = await xrocket.get_payout_status(row["provider_ref"])
+                    if status == "paid":
+                        if await _run(_wd_move, row["id"], ("pending",), "paid"):
+                            await _notify_user(bot, row["user_id"], _paid_text(xrocket, row["user_id"], row["amount"]), "paid")
+                    elif status == "failed":
+                        result = await _fail_and_refund(bot, row["id"], row["user_id"], row["amount"], "provider status: failed")
+                        await _notify_user(bot, row["user_id"], result.text, result.status)
+                    elif now - row["created_at"] > PENDING_WITHDRAW_ALERT_SECONDS:
+                        if await _run(_wd_move, row["id"], ("pending",), "review", None, "pending too long"):
+                            await _alert_admins(
+                                bot,
+                                f"#{row['id']} user=<code>{row['user_id']}</code> ${row['amount']:.2f} — выплата xRocket "
+                                f"висит в pending больше часа (payoutId <code>{row['provider_ref']}</code>).",
+                            )
+        except asyncio.CancelledError:
+            raise
+        except PaymentError as ex:
+            log.warning("[watch withdrawals] %s", ex)
+            await asyncio.sleep(ex.retry_after if ex.retry_after is not None else 5)
+        except Exception as ex:
+            log.warning("[watch withdrawals] %s", ex)
+        await asyncio.sleep(WITHDRAW_POLL_SECONDS)
+
+
 def start_watchers(bot: Bot) -> None:
     """Создаёт БД и запускает фоновые проверки оплаты. Вызывать из main() один раз."""
     _db_init()
@@ -537,6 +952,7 @@ def start_watchers(bot: Bot) -> None:
         log.warning("[payments] ни CRYPTOBOT_TOKEN, ни XROCKET_TOKEN не заданы — пополнение недоступно")
     _tasks.append(asyncio.create_task(_watch_cryptobot(bot), name="watch-cryptobot"))
     _tasks.append(asyncio.create_task(_watch_xrocket(bot), name="watch-xrocket"))
+    _tasks.append(asyncio.create_task(_watch_withdrawals(bot), name="watch-withdrawals"))
 
 
 async def stop_watchers() -> None:
@@ -787,3 +1203,216 @@ async def deposit_check_button(callback: CallbackQuery) -> None:
         await callback.answer("Счёт истёк, создайте новый", show_alert=True)
     else:
         await callback.answer("Оплата пока не найдена. Оплатите счёт и нажмите снова.", show_alert=True)
+
+
+# --------------------------------------------------------------------------
+# Хендлеры вывода (aiogram)
+# --------------------------------------------------------------------------
+
+
+class WithdrawStates(StatesGroup):
+    waiting_amount = State()
+
+
+def _balance(user_id: int) -> float:
+    return float(get_profile_stats(user_id)["balance"])
+
+
+def _max_cents(balance: float) -> int:
+    """Максимум, который можно вывести сейчас (в центах, округляем вниз)."""
+    return int(min(balance, MAX_WITHDRAW_USD) * 100 + 1e-6)
+
+
+def _amount_error(user_id: int, amount: float) -> str | None:
+    if not MIN_WITHDRAW_USD <= amount <= MAX_WITHDRAW_USD:
+        return f"Сумма должна быть от {MIN_WITHDRAW_USD:g}$ до {MAX_WITHDRAW_USD:g}$."
+    balance = _balance(user_id)
+    if amount > balance + 0.005:
+        return f"Недостаточно средств. Доступно: {_fmt_usd(balance)}"
+    return None
+
+
+def _wd_methods_keyboard() -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=p.title, callback_data=f"wd:m:{p.key}", icon_custom_emoji_id=p.emoji_id)]
+        for p in (cryptobot, xrocket)
+    ]
+    rows.append(_back_button("menu:profile"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _wd_amount_keyboard(provider_key: str, balance: float) -> InlineKeyboardMarkup:
+    max_cents = _max_cents(balance)
+    buttons = [
+        InlineKeyboardButton(text=f"{a}$", callback_data=f"wd:a:{provider_key}:{a * 100}")
+        for a in WITHDRAW_QUICK_AMOUNTS
+        if a * 100 <= max_cents and a >= MIN_WITHDRAW_USD
+    ]
+    if max_cents >= int(MIN_WITHDRAW_USD * 100):
+        buttons.append(InlineKeyboardButton(text="Весь баланс", callback_data=f"wd:a:{provider_key}:{max_cents}"))
+    rows = [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
+    rows.append(_back_button("profile:withdraw"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _wd_confirm_text(provider: CryptoBotClient | XRocketClient, amount: float) -> str:
+    return (
+        f"{WITHDRAW_ICON} <b>Подтверждение вывода</b>\n\n"
+        f"┌ Способ: <b>{_provider_label(provider)}</b>\n"
+        f"├ Сумма: <b>{_fmt_usd(amount)}</b>\n"
+        f"└ Получатель: <b>ваш аккаунт Telegram</b>\n\n"
+        f"<i>Сумма спишется с баланса и придёт в {provider.title} в USDT. "
+        "Вы должны хотя бы раз запускать этого бота.</i>"
+    )
+
+
+def _wd_confirm_keyboard(provider_key: str, amount: float) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Подтвердить вывод", callback_data=f"wd:ok:{provider_key}:{int(round(amount * 100))}")],
+            _back_button(f"wd:m:{provider_key}"),
+        ]
+    )
+
+
+def _result_keyboard(status: str) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if status in ("failed", "review"):
+        rows.append(
+            [InlineKeyboardButton(text="Поддержка", callback_data="menu:support", icon_custom_emoji_id=EMOJI_SUPPORT)]
+        )
+    rows.append(_back_button("menu:profile"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _notify_user(bot: Bot, user_id: int, text: str, status: str) -> None:
+    try:
+        await bot.send_message(user_id, text, reply_markup=_result_keyboard(status))
+    except Exception as ex:
+        log.warning("[withdraw] не удалось уведомить user=%s: %s", user_id, ex)
+
+
+async def show_withdraw_methods(callback: CallbackQuery, state: FSMContext) -> None:
+    """Экран выбора способа вывода (вызывается из main.py по кнопке «Вывести»)."""
+    await state.clear()
+    balance = _balance(callback.from_user.id)
+    if balance + 1e-9 < MIN_WITHDRAW_USD:
+        await callback.answer(
+            f"Минимальная сумма вывода — {MIN_WITHDRAW_USD:g}$. Ваш баланс: {_fmt_usd(balance)}", show_alert=True
+        )
+        return
+    await callback.message.edit_text(
+        f"{WITHDRAW_ICON} <b>Вывод средств</b>\n\n"
+        f"└ Доступно: <b>{_fmt_usd(balance)}</b>\n\n"
+        "<i>Выберите способ вывода. Средства придут в USDT на ваш аккаунт Telegram "
+        "в выбранном сервисе.</i>",
+        reply_markup=_wd_methods_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("wd:m:"))
+async def withdraw_method_chosen(callback: CallbackQuery, state: FSMContext) -> None:
+    provider_key = callback.data.split(":")[2]
+    provider = PROVIDERS.get(provider_key)
+    if provider is None:
+        await callback.answer("Неизвестный способ", show_alert=True)
+        return
+    if not provider.configured:
+        await callback.answer(f"{provider.title} временно недоступен", show_alert=True)
+        return
+
+    balance = _balance(callback.from_user.id)
+    if balance + 1e-9 < MIN_WITHDRAW_USD:
+        await callback.answer(
+            f"Минимальная сумма вывода — {MIN_WITHDRAW_USD:g}$. Ваш баланс: {_fmt_usd(balance)}", show_alert=True
+        )
+        return
+
+    await state.set_state(WithdrawStates.waiting_amount)
+    await state.update_data(wd_provider=provider_key, wd_ts=time.time())
+    await callback.message.edit_text(
+        f"{WITHDRAW_ICON} <b>Вывод — {_provider_label(provider)}</b>\n\n"
+        f"┌ Доступно: <b>{_fmt_usd(balance)}</b>\n"
+        f"└ Лимиты: <b>от {MIN_WITHDRAW_USD:g}$ до {MAX_WITHDRAW_USD:g}$</b>\n\n"
+        "<i>Выберите сумму или отправьте её в чат числом.</i>",
+        reply_markup=_wd_amount_keyboard(provider_key, balance),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("wd:a:"))
+async def withdraw_amount_chosen(callback: CallbackQuery, state: FSMContext) -> None:
+    try:
+        _, _, provider_key, cents_str = callback.data.split(":")
+        amount = int(cents_str) / 100
+    except ValueError:
+        await callback.answer("Недопустимая сумма", show_alert=True)
+        return
+    provider = PROVIDERS.get(provider_key)
+    if provider is None:
+        await callback.answer("Неизвестный способ", show_alert=True)
+        return
+    error = _amount_error(callback.from_user.id, amount)
+    if error:
+        await callback.answer(error, show_alert=True)
+        return
+
+    await state.clear()
+    await callback.message.edit_text(
+        _wd_confirm_text(provider, amount), reply_markup=_wd_confirm_keyboard(provider_key, amount)
+    )
+    await callback.answer()
+
+
+@router.message(WithdrawStates.waiting_amount, F.text)
+async def withdraw_amount_message(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    provider_key = data.get("wd_provider")
+    text = (message.text or "").strip().replace(",", ".")
+
+    # Не число или ввод устарел — игрок ушёл из вывода: отдаём сообщение следующим обработчикам.
+    stale = time.time() - data.get("wd_ts", 0) > AMOUNT_INPUT_TTL_SECONDS
+    if provider_key not in PROVIDERS or stale or not re.fullmatch(r"\d+(\.\d+)?", text):
+        await state.clear()
+        raise SkipHandler
+
+    amount = round(float(text), 2)
+    error = _amount_error(message.from_user.id, amount)
+    if error:
+        await message.answer(error)
+        return
+
+    await state.clear()
+    await message.answer(
+        _wd_confirm_text(PROVIDERS[provider_key], amount), reply_markup=_wd_confirm_keyboard(provider_key, amount)
+    )
+
+
+@router.callback_query(F.data.startswith("wd:ok:"))
+async def withdraw_confirm(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    try:
+        _, _, provider_key, cents_str = callback.data.split(":")
+        amount = int(cents_str) / 100
+    except ValueError:
+        await callback.answer("Недопустимая сумма", show_alert=True)
+        return
+
+    user_id = callback.from_user.id
+    try:
+        result = await _execute_withdrawal(callback.bot, user_id, provider_key, amount)
+    except Exception:
+        # _execute_withdrawal сам ловит всё, это — страховка от совсем неожиданного
+        log.exception("[withdraw] сбой обработчика user=%s", user_id)
+        result = WithdrawResult("review", _error_text("Не удалось выполнить вывод", None))
+
+    if result.status == "rejected":
+        await callback.answer(result.text, show_alert=True)
+        return
+
+    await callback.answer()
+    try:
+        await callback.message.edit_text(result.text, reply_markup=_result_keyboard(result.status))
+    except Exception:
+        await _notify_user(callback.bot, user_id, result.text, result.status)
