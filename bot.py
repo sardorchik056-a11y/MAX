@@ -22,7 +22,7 @@ dp = Dispatcher()
 
 def build_card() -> InputRichMessage:
     # Заголовок карточки
-    heading = InputRichBlockSectionHeading(text="Candy Cane #11319")
+    heading = InputRichBlockSectionHeading(text="Candy Cane #11319", size=1)
 
     # Таблица: каждая строка — список ячеек
     rows = [
@@ -76,6 +76,9 @@ async def on_back(call: CallbackQuery):
 
 
 async def main():
+    # удаляем webhook (если был установлен) и накопившиеся апдейты,
+    # иначе getUpdates/polling будет конфликтовать с ним
+    await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 
