@@ -52,14 +52,12 @@ def build_card() -> InputRichMessage:
         buttons=[RichMessageButton(text="🛍 Купить за $6.81", callback_data="buy_11319")]
     )
 
-    return InputRichMessage(blocks=[heading, table, gift_button, buy_button])
+    return InputRichMessage(blocks=[heading, gift_button, table, buy_button])
 
 
 def build_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🎁 Посмотреть подарок ↗", url="https://t.me/nft/CandyCane-11319")],
-            [InlineKeyboardButton(text="🛍 Купить за $6.81", callback_data="buy_11319")],
             [InlineKeyboardButton(text="← Назад", callback_data="back")],
         ]
     )
