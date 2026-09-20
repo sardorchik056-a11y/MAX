@@ -12,6 +12,8 @@ from aiogram.types import (
     InputRichBlockSectionHeading,
     InputRichBlockTable,
     RichBlockTableCell,
+    InputRichBlockButtons,
+    RichMessageButton,
 )
 
 BOT_TOKEN = "8841055640:AAE65cYHaE9XVEo2fQLwZ5kPxrR1Fncqm5Q"
@@ -41,7 +43,16 @@ def build_card() -> InputRichMessage:
     ]
     table = InputRichBlockTable(cells=rows, is_bordered=True, is_striped=False)
 
-    return InputRichMessage(blocks=[heading, table])
+    # Эти две кнопки — ЧАСТЬ карточки (светлый фон, как на скрине),
+    # а не отдельная reply_markup под сообщением
+    gift_button = InputRichBlockButtons(
+        buttons=[RichMessageButton(text="🎁 Посмотреть подарок ↗", url="https://t.me/nft/CandyCane-11319")]
+    )
+    buy_button = InputRichBlockButtons(
+        buttons=[RichMessageButton(text="🛍 Купить за $6.81", callback_data="buy_11319")]
+    )
+
+    return InputRichMessage(blocks=[heading, table, gift_button, buy_button])
 
 
 def build_keyboard() -> InlineKeyboardMarkup:
