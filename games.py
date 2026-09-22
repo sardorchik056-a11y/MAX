@@ -231,6 +231,23 @@ BOWLING_BET_TYPES = {
     'боулинг_конкретныйдубль': {'multiplier': 36.0, 'special': 'double_bowling_specific_double'},
 }
 
+# --- ТИПЫ СТАВОК ДЛЯ СЛОТОВ (🎰) ---
+# Telegram присылает для эмодзи 🎰 значение dice.value от 1 до 64 (4 барабана x 4 символа = 64 варианта).
+# Формула Telegram: value = 1 + left + 4*mid + 16*right, где каждый барабан — один из 4 символов
+# (0=бар, 1=виноград, 2=лимон, 3=семёрка). Тройные совпадения:
+#   1  = бар/бар/бар
+#   22 = виноград/виноград/виноград
+#   43 = лимон/лимон/лимон
+#   64 = семёрка/семёрка/семёрка (джекпот)
+# 'слоты_любая' засчитывает любую из этих 4 троек (любая одинаковая комбинация).
+SLOTS_BET_TYPES = {
+    'слоты_бар':      {'values': [1],          'multiplier': 64.0},
+    'слоты_виноград': {'values': [22],         'multiplier': 64.0},
+    'слоты_лимон':    {'values': [43],         'multiplier': 64.0},
+    'слоты_семерки':  {'values': [64],         'multiplier': 64.0},
+    'слоты_любая':    {'values': [1, 22, 43, 64], 'multiplier': 64.0},
+}
+
 _BET_TYPE_DISPLAY_NAMES = {
     'куб_':     'Кубик',
     'куб2_':    '2 Куба',
@@ -240,6 +257,7 @@ _BET_TYPE_DISPLAY_NAMES = {
     'дартс_':   'Дартс',
     'дартс2_':  'Дартс (дубль)',
     'боулинг_': 'Боулинг',
+    'слоты_':   'Слоты',
 }
 
 def _get_game_display_name(bet_type: str) -> str:
@@ -274,6 +292,8 @@ BET_TYPE_TO_CODE = {
     'боулинг_промах': 'bw_m', 'боулинг_1из6': 'bw_1', 'боулинг_3из6': 'bw_3',
     'боулинг_4из6': 'bw_4', 'боулинг_5из6': 'bw_5',
     'боулинг_любойдубль': 'bw_d', 'боулинг_конкретныйдубль': 'bw_sd',
+    'слоты_бар': 'sl_b', 'слоты_виноград': 'sl_g', 'слоты_лимон': 'sl_l',
+    'слоты_семерки': 'sl_7', 'слоты_любая': 'sl_a',
 }
 CODE_TO_BET_TYPE = {v: k for k, v in BET_TYPE_TO_CODE.items()}
 
@@ -299,6 +319,8 @@ _OUTCOME_LABELS = {
     'боулинг_промах': 'Промах', 'боулинг_1из6': 'Сбито 1/6', 'боулинг_3из6': 'Сбито 3/6',
     'боулинг_4из6': 'Сбито 4/6', 'боулинг_5из6': 'Сбито 5/6',
     'боулинг_любойдубль': 'Любой дубль',
+    'слоты_бар': 'BAR BAR BAR', 'слоты_виноград': 'Виноград x3', 'слоты_лимон': 'Лимон x3',
+    'слоты_семерки': 'Семёрки 777', 'слоты_любая': 'Любая тройка',
 }
 
 # --- Автоматически строим "число -> название" для футбола из FOOTBALL_BET_TYPES,
@@ -368,6 +390,8 @@ def _bet_emoji_for(bet_type: str) -> str:
         return "🎯"
     elif bet_type.startswith('боулинг_'):
         return "🎳"
+    elif bet_type.startswith('слоты_'):
+        return "🎰"
     return "🎲"
 
 
@@ -388,6 +412,8 @@ def _menu_key_for(bet_type: str) -> str:
         return 'bowling2'
     elif bet_type.startswith('боулинг_'):
         return 'bowling'
+    elif bet_type.startswith('слоты_'):
+        return 'slots'
     return 'dice1'
 
 
@@ -447,6 +473,10 @@ COMMAND_MAPPING = {
     'bowling': 'боулинг',
     'боул':    'боулинг',
     'bowl':    'боулинг',
+    'слоты':   'слоты',
+    'slots':   'слоты',
+    'слот':    'слоты',
+    'slot':    'слоты',
 }
 
 BET_TYPE_MAPPING = {
@@ -522,6 +552,20 @@ BET_TYPE_MAPPING = {
     'страйк': 'боулинг_страйк',
     'strike': 'боулинг_страйк',
     'стр':    'боулинг_страйк',
+    'бар':      'слоты_бар',
+    'bar':      'слоты_бар',
+    'виноград': 'слоты_виноград',
+    'grape':    'слоты_виноград',
+    'grapes':   'слоты_виноград',
+    'лимон':    'слоты_лимон',
+    'lemon':    'слоты_лимон',
+    'семерки':  'слоты_семерки',
+    'семёрки':  'слоты_семерки',
+    '777':      'слоты_семерки',
+    'seven':    'слоты_семерки',
+    'sevens':   'слоты_семерки',
+    'любая':    'слоты_любая',
+    'any':      'слоты_любая',
 }
 
 # Текстовые названия исходов боулинга ("боулинг 1/6 0.5", "боулинг промах 1" и т.п.).
@@ -658,6 +702,8 @@ class BettingGame:
             return DART_2_BET_TYPES.get(bet_type)
         elif bet_type.startswith('боулинг_'):
             return BOWLING_BET_TYPES.get(bet_type)
+        elif bet_type.startswith('слоты_'):
+            return SLOTS_BET_TYPES.get(bet_type)
         return None
 
     def set_referral_system(self, referral_system):
@@ -1663,7 +1709,7 @@ async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup=Non
 #  Единый hub игр
 # ─────────────────────────────────────────────────────────────────────────────
 
-GAME_TAB_ORDER = ['dice', 'football', 'basketball', 'darts', 'bowling']
+GAME_TAB_ORDER = ['dice', 'football', 'basketball', 'darts', 'bowling', 'slots']
 
 GAME_TAB_EMOJI = {
     'dice':       '🎲',
@@ -1671,6 +1717,7 @@ GAME_TAB_EMOJI = {
     'basketball': '🏀',
     'darts':      '🎯',
     'bowling':    '🎳',
+    'slots':      '🎰',
 }
 
 GAME_TAB_TITLE = {
@@ -1679,6 +1726,7 @@ GAME_TAB_TITLE = {
     'basketball': 'Баскетбол',
     'darts':      'Дартс',
     'bowling':    'Боулинг',
+    'slots':      'Слоты',
 }
 
 
@@ -1698,6 +1746,7 @@ GAME_MAX_MULTIPLIER = {
     'basketball': _max_multiplier(BASKETBALL_BET_TYPES),
     'darts':      _max_multiplier({**DART_BET_TYPES, **DART_2_BET_TYPES}),
     'bowling':    _max_multiplier(BOWLING_BET_TYPES),
+    'slots':      _max_multiplier(SLOTS_BET_TYPES),
 }
 
 
@@ -2078,6 +2127,37 @@ async def show_darts_menu(callback: CallbackQuery, betting_game: 'BettingGame' =
     await callback.answer()
 
 
+def _build_slots_menu_content(betting_game: 'BettingGame' = None, user_id: int = 0):
+    def btn(text: str, bet_type: str) -> InlineKeyboardButton:
+        mult = _fmt_mult(SLOTS_BET_TYPES[bet_type]['multiplier'])
+        return InlineKeyboardButton(text=f"{text} (x{mult})", callback_data=f"bet_slots_{bet_type}")
+
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        _tabs_row('slots'),
+        [btn("BAR BAR BAR", 'слоты_бар')],
+        [btn("🍇 Виноград x3", 'слоты_виноград')],
+        [btn("🍋 Лимон x3", 'слоты_лимон')],
+        [btn("7️⃣ Семёрки 777", 'слоты_семерки')],
+        [btn("Любая комбинация", 'слоты_любая')],
+        [
+            InlineKeyboardButton(text="Назад", callback_data="games", icon_custom_emoji_id=EMOJI_BACK)
+        ]
+    ])
+    header = _bet_balance_block(betting_game, user_id) if betting_game else ""
+    text = (
+        f"<blockquote><b>🎰 Слоты</b></blockquote>\n\n"
+        f"{header}"
+        f"<blockquote><b><i>Выберите комбинацию:</i></b></blockquote>\n\n"
+    )
+    return text, markup
+
+
+async def show_slots_menu(callback: CallbackQuery, betting_game: 'BettingGame' = None):
+    text, markup = _build_slots_menu_content(betting_game, callback.from_user.id)
+    await safe_edit_message(callback, text, reply_markup=markup, parse_mode='HTML')
+    await callback.answer()
+
+
 # --- РАЗДЕЛЫ ДЛЯ БОУЛИНГА (как в кубике: «1 бросок» / «2 броска» наверху) ---
 BOWLING_TAB_ORDER = ['1бросок', '2броска']
 
@@ -2179,6 +2259,7 @@ GAME_MENU_COMMAND_TO_KEY = {
     'баскетбол': 'basketball', 'bask': 'basketball',
     'дартс': 'darts', 'dart': 'darts', 'darts': 'darts', 'дарт': 'darts',
     'боулинг': 'bowling', 'bowling': 'bowling', 'боул': 'bowling', 'bowl': 'bowling',
+    'слоты': 'slots', 'slots': 'slots', 'слот': 'slots', 'slot': 'slots',
 }
 
 
@@ -2213,6 +2294,8 @@ async def handle_game_menu_command(message: Message, betting_game: 'BettingGame'
         text, markup = _build_darts_menu_content(betting_game, user_id)
     elif menu_key == 'bowling':
         text, markup = _build_bowling_menu_content(betting_game, user_id)
+    elif menu_key == 'slots':
+        text, markup = _build_slots_menu_content(betting_game, user_id)
     else:
         return
 
@@ -2404,11 +2487,12 @@ _GAME_CATEGORY_HANDLERS = {
     'basketball': show_basketball_menu,
     'darts': show_darts_menu,
     'bowling': show_bowling_menu,
+    'slots': show_slots_menu,
 }
 
 _BET_CALLBACK_PREFIXES = (
     "bet_dice3_", "bet_dice2_", "bet_dice_",
-    "bet_basketball_", "bet_football_", "bet_darts_", "bet_bowling_",
+    "bet_basketball_", "bet_football_", "bet_darts_", "bet_bowling_", "bet_slots_",
 )
 
 _IN_DEV_GAME_CALLBACKS = {"custom_games_menu"}
