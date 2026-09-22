@@ -2,11 +2,9 @@ import asyncio
 import logging
 import os
 import random
-import secrets
 import string
 from datetime import datetime, timedelta, timezone
 
-from aiohttp import web
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -21,7 +19,6 @@ from aiogram.types import (
     Message,
     ReplyKeyboardMarkup,
 )
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 # --------------------------------------------------------------------------
 # Конфигурация
@@ -34,27 +31,6 @@ BOT_TOKEN = os.environ["BOT_TOKEN"]
 # ID администраторов бота (Telegram user_id). Узнать свой ID можно, например,
 # у @userinfobot. Добавьте сюда ID всех, кому нужен доступ к админ-панели.
 ADMIN_IDS: set[int] = {8118184388}
-
-# --------------------------------------------------------------------------
-# Вебхук / Render
-# --------------------------------------------------------------------------
-# Render сам прокидывает публичный URL сервиса в RENDER_EXTERNAL_URL и порт,
-# на котором нужно слушать, в PORT — руками их задавать не нужно.
-# WEBHOOK_SECRET — случайная часть пути + заголовок X-Telegram-Bot-Api-Secret-Token,
-# чтобы на вебхук нельзя было прислать апдейт, подделав запрос напрямую на /webhook.
-# Можно один раз сгенерировать и зафиксировать значением в env (WEBHOOK_SECRET),
-# иначе при каждом деплое сгенерируется новое и Telegram-вебхук будет переустановлен.
-WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET") or secrets.token_urlsafe(32)
-WEBHOOK_PATH = f"/webhook/{WEBHOOK_SECRET}"
-
-WEBHOOK_HOST = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("WEBHOOK_HOST")
-WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}" if WEBHOOK_HOST else None
-
-WEB_SERVER_HOST = "0.0.0.0"
-WEB_SERVER_PORT = int(os.environ.get("PORT", 10000))
-
-
-
 
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
@@ -1887,8 +1863,11 @@ async def admin_broadcast_send(message: Message, state: FSMContext, bot: Bot) ->
 
 
 async def on_startup(bot: Bot) -> None:
-    """Всё, что раньше выполнялось перед start_polling — теперь выполняется
-    перед поднятием веб-сервера и регистрацией вебхука в Telegram."""
+    """Всё, что нужно сделать перед началом поллинга."""
+    # На случай, если раньше был установлен вебхук — снимаем его и сбрасываем
+    # накопленные апдейты, иначе Telegram будет ругаться и поллинг не начнётся.
+    await bot.delete_webhook(drop_pending_updates=True)
+
     # Создаёт единственный экземпляр BettingGame и регистрирует его как
     # общий для games.py (через set_betting_game внутри __init__), чтобы все
     # хендлеры раздела «Игры» могли получить его через get_betting_game().
@@ -1903,40 +1882,9 @@ async def on_startup(bot: Bot) -> None:
     # Фоновая проверка оплаты счетов CryptoBot / xRocket
     payments_module.start_watchers(bot)
 
-    if not WEBHOOK_URL:
-        raise RuntimeError(
-            "Не задан внешний адрес сервиса: нет ни RENDER_EXTERNAL_URL (Render выставляет "
-            "его сам для web-сервисов), ни WEBHOOK_HOST в переменных окружения."
-        )
-    ok = await bot.set_webhook(
-        WEBHOOK_URL,
-        secret_token=WEBHOOK_SECRET,
-        drop_pending_updates=True,
-    )
-    logging.info("set_webhook() вернул: %r, URL: %s", ok, WEBHOOK_URL)
-
-    # Самопроверка: сразу спрашиваем у Telegram, что реально записалось —
-    # чтобы в логах Render было видно, приняли ли вебхук на самом деле.
-    info = await bot.get_webhook_info()
-    logging.info(
-        "get_webhook_info() сразу после установки: url=%r pending=%s last_error=%r",
-        info.url, info.pending_update_count, info.last_error_message,
-    )
-
 
 async def on_shutdown(bot: Bot) -> None:
-    # ВАЖНО: НЕ удаляем вебхук здесь. Render деплоит с нулевым даунтаймом —
-    # новый процесс уже поставил свой вебхук и живёт, а этот shutdown-хук
-    # старого процесса срабатывает уже ПОСЛЕ этого. bot.delete_webhook() тут
-    # снёс бы только что установленный вебхук нового инстанса — апдейты
-    # переставали бы доставляться до следующего деплоя. Просто гасим фоновые
-    # задачи этого (умирающего) процесса.
     await payments_module.stop_watchers()
-
-
-async def health_check(request: web.Request) -> web.Response:
-    """Для Render Health Check (и просто чтобы GET / не 404-ил при открытии в браузере)."""
-    return web.Response(text="ok")
 
 
 def main() -> None:
@@ -1970,14 +1918,7 @@ def main() -> None:
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
 
-    app = web.Application()
-    app.router.add_get("/", health_check)
-    SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(
-        app, path=WEBHOOK_PATH
-    )
-    setup_application(app, dp, bot=bot)
-
-    web.run_app(app, host=WEB_SERVER_HOST, port=WEB_SERVER_PORT)
+    asyncio.run(dp.start_polling(bot))
 
 
 if __name__ == "__main__":
