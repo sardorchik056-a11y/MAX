@@ -246,7 +246,52 @@ SLOTS_BET_TYPES = {
     'слоты_лимон':    {'values': [43],         'multiplier': 64.0},
     'слоты_семерки':  {'values': [64],         'multiplier': 64.0},
     'слоты_любая':    {'values': [1, 22, 43, 64], 'multiplier': 64.0},
+
+    # --- Уникальные символы (все 3 барабана разные) ---
+    'слоты_уникальные': {'multiplier': 2.66, 'special': 'slots_unique'},
+
+    # --- Точный исход (сколько раз выбранный символ выпал среди 3 барабанов) ---
+    'слоты_2бар':      {'multiplier': 7.11, 'special': 'slots_exact_count', 'symbol': 0, 'count': 2},
+    'слоты_1бар':      {'multiplier': 2.37, 'special': 'slots_exact_count', 'symbol': 0, 'count': 1},
+    'слоты_2виноград': {'multiplier': 7.11, 'special': 'slots_exact_count', 'symbol': 1, 'count': 2},
+    'слоты_1виноград': {'multiplier': 2.37, 'special': 'slots_exact_count', 'symbol': 1, 'count': 1},
+    'слоты_2лимон':    {'multiplier': 7.11, 'special': 'slots_exact_count', 'symbol': 2, 'count': 2},
+    'слоты_1лимон':    {'multiplier': 2.37, 'special': 'slots_exact_count', 'symbol': 2, 'count': 1},
+    'слоты_2семерки':  {'multiplier': 7.11, 'special': 'slots_exact_count', 'symbol': 3, 'count': 2},
+    'слоты_1семерки':  {'multiplier': 2.37, 'special': 'slots_exact_count', 'symbol': 3, 'count': 1},
 }
+
+# --- ТИПЫ СТАВОК ДЛЯ СЛОТОВ — 2 БРОСКА (комбо до x400) ---
+# Игрок выбирает символ, бот крутит слоты 2 раза подряд (6 барабанов всего).
+# Выплата зависит от того, сколько раз выбранный символ выпал среди этих 6 барабанов.
+SLOTS_2_BET_TYPES = {
+    'слоты2_комбо_бар':      {'multiplier': 400.0, 'special': 'double_slots_combo', 'symbol': 0},
+    'слоты2_комбо_виноград': {'multiplier': 400.0, 'special': 'double_slots_combo', 'symbol': 1},
+    'слоты2_комбо_лимон':    {'multiplier': 400.0, 'special': 'double_slots_combo', 'symbol': 2},
+    'слоты2_комбо_семерки':  {'multiplier': 400.0, 'special': 'double_slots_combo', 'symbol': 3},
+
+    # Оба броска дали 3 разных символа
+    'слоты2_уникальные': {'multiplier': 7.11, 'special': 'double_slots_unique'},
+
+    # Оба броска — выигрышная тройка (любая, необязательно одинаковая между бросками)
+    'слоты2_любыекомбо': {'multiplier': 256.0, 'special': 'double_slots_any_triple'},
+}
+
+# Таблица выплат для 'double_slots_combo' по количеству совпадений выбранного символа
+# среди 6 барабанов (2 броска по 3 барабана)
+SLOTS_2_COMBO_PAYOUTS = {3: 4.0, 4: 8.0, 5: 25.0, 6: 400.0}
+
+# Коды символов слотов <-> человекочитаемые названия
+SLOT_SYMBOL_NAME = {0: 'BAR', 1: '🍇 Виноград', 2: '🍋 Лимон', 3: '7️⃣ Семёрка'}
+
+
+def _slots_reels(value: int):
+    """Декодирует значение dice.value (1..64) эмодзи 🎰 в 3 барабана (0=бар,1=виноград,2=лимон,3=семёрка)."""
+    v = value - 1
+    r1 = v % 4
+    r2 = (v // 4) % 4
+    r3 = (v // 16) % 4
+    return r1, r2, r3
 
 _BET_TYPE_DISPLAY_NAMES = {
     'куб_':     'Кубик',
@@ -257,6 +302,7 @@ _BET_TYPE_DISPLAY_NAMES = {
     'дартс_':   'Дартс',
     'дартс2_':  'Дартс (дубль)',
     'боулинг_': 'Боулинг',
+    'слоты2_':  'Слоты (2 броска)',
     'слоты_':   'Слоты',
 }
 
@@ -294,6 +340,14 @@ BET_TYPE_TO_CODE = {
     'боулинг_любойдубль': 'bw_d', 'боулинг_конкретныйдубль': 'bw_sd',
     'слоты_бар': 'sl_b', 'слоты_виноград': 'sl_g', 'слоты_лимон': 'sl_l',
     'слоты_семерки': 'sl_7', 'слоты_любая': 'sl_a',
+    'слоты_уникальные': 'sl_u',
+    'слоты_2бар': 'sl_2b', 'слоты_1бар': 'sl_1b',
+    'слоты_2виноград': 'sl_2g', 'слоты_1виноград': 'sl_1g',
+    'слоты_2лимон': 'sl_2l', 'слоты_1лимон': 'sl_1l',
+    'слоты_2семерки': 'sl_2s', 'слоты_1семерки': 'sl_1s',
+    'слоты2_комбо_бар': 'sl2_cb', 'слоты2_комбо_виноград': 'sl2_cg',
+    'слоты2_комбо_лимон': 'sl2_cl', 'слоты2_комбо_семерки': 'sl2_cs',
+    'слоты2_уникальные': 'sl2_u', 'слоты2_любыекомбо': 'sl2_a',
 }
 CODE_TO_BET_TYPE = {v: k for k, v in BET_TYPE_TO_CODE.items()}
 
@@ -321,6 +375,17 @@ _OUTCOME_LABELS = {
     'боулинг_любойдубль': 'Любой дубль',
     'слоты_бар': 'BAR BAR BAR', 'слоты_виноград': 'Виноград x3', 'слоты_лимон': 'Лимон x3',
     'слоты_семерки': 'Семёрки 777', 'слоты_любая': 'Любая тройка',
+    'слоты_уникальные': 'Уникальные символы',
+    'слоты_2бар': '2× BAR', 'слоты_1бар': '1× BAR',
+    'слоты_2виноград': '2× Виноград', 'слоты_1виноград': '1× Виноград',
+    'слоты_2лимон': '2× Лимон', 'слоты_1лимон': '1× Лимон',
+    'слоты_2семерки': '2× Семёрка', 'слоты_1семерки': '1× Семёрка',
+    'слоты2_комбо_бар': 'Комбо BAR',
+    'слоты2_комбо_виноград': 'Комбо Виноград',
+    'слоты2_комбо_лимон': 'Комбо Лимон',
+    'слоты2_комбо_семерки': 'Комбо Семёрка',
+    'слоты2_уникальные': '2 броска: уникальные',
+    'слоты2_любыекомбо': '2 броска: любая комбинация',
 }
 
 # --- Автоматически строим "число -> название" для футбола из FOOTBALL_BET_TYPES,
@@ -390,7 +455,7 @@ def _bet_emoji_for(bet_type: str) -> str:
         return "🎯"
     elif bet_type.startswith('боулинг_'):
         return "🎳"
-    elif bet_type.startswith('слоты_'):
+    elif bet_type.startswith('слоты2_') or bet_type.startswith('слоты_'):
         return "🎰"
     return "🎲"
 
@@ -412,6 +477,8 @@ def _menu_key_for(bet_type: str) -> str:
         return 'bowling2'
     elif bet_type.startswith('боулинг_'):
         return 'bowling'
+    elif bet_type.startswith('слоты2_'):
+        return 'slots2'
     elif bet_type.startswith('слоты_'):
         return 'slots'
     return 'dice1'
@@ -568,6 +635,24 @@ BET_TYPE_MAPPING = {
     'any':      'слоты_любая',
 }
 
+# Текстовые названия новых исходов слотов ("слоты уник 0.5", "слоты 2бар 1" и т.п.).
+# Проверяются раньше общего BET_TYPE_MAPPING (там короткие числовые ключи уже заняты кубиком).
+SLOTS_TEXT_ALIASES = {
+    'уникальные': 'слоты_уникальные', 'уник': 'слоты_уникальные', 'unique': 'слоты_уникальные',
+    '2бар': 'слоты_2бар', '1бар': 'слоты_1бар',
+    '2виноград': 'слоты_2виноград', '1виноград': 'слоты_1виноград',
+    '2лимон': 'слоты_2лимон', '1лимон': 'слоты_1лимон',
+    '2семерки': 'слоты_2семерки', '1семерки': 'слоты_1семерки',
+    '2семёрки': 'слоты_2семерки', '1семёрки': 'слоты_1семерки',
+    'комбобар': 'слоты2_комбо_бар', 'комбо_бар': 'слоты2_комбо_бар',
+    'комбовиноград': 'слоты2_комбо_виноград', 'комбо_виноград': 'слоты2_комбо_виноград',
+    'комболимон': 'слоты2_комбо_лимон', 'комбо_лимон': 'слоты2_комбо_лимон',
+    'комбосемерки': 'слоты2_комбо_семерки', 'комбо_семерки': 'слоты2_комбо_семерки',
+    'комбосемёрки': 'слоты2_комбо_семерки', 'комбо_семёрки': 'слоты2_комбо_семерки',
+    'уникальные2': 'слоты2_уникальные', '2уникальные': 'слоты2_уникальные',
+    'любыекомбо': 'слоты2_любыекомбо', '2комбо': 'слоты2_любыекомбо',
+}
+
 # Текстовые названия исходов боулинга ("боулинг 1/6 0.5", "боулинг промах 1" и т.п.).
 # Проверяются раньше общего BET_TYPE_MAPPING, т.к. там "промах" относится к баскетболу.
 BOWLING_TEXT_ALIASES = {
@@ -702,6 +787,8 @@ class BettingGame:
             return DART_2_BET_TYPES.get(bet_type)
         elif bet_type.startswith('боулинг_'):
             return BOWLING_BET_TYPES.get(bet_type)
+        elif bet_type.startswith('слоты2_'):
+            return SLOTS_2_BET_TYPES.get(bet_type)
         elif bet_type.startswith('слоты_'):
             return SLOTS_BET_TYPES.get(bet_type)
         return None
@@ -777,6 +864,8 @@ def parse_bet_command(text: str) -> Optional[Tuple[str, float]]:
             full_bet_type = BET_TYPE_MAPPING.get(bet_type_key)
     elif game_prefix == 'боулинг':
         full_bet_type = BOWLING_TEXT_ALIASES.get(bet_type_key) or BET_TYPE_MAPPING.get(bet_type_key)
+    elif game_prefix == 'слоты':
+        full_bet_type = SLOTS_TEXT_ALIASES.get(bet_type_key) or BET_TYPE_MAPPING.get(bet_type_key)
     else:
         full_bet_type = BET_TYPE_MAPPING.get(bet_type_key)
     if not full_bet_type:
@@ -1437,6 +1526,112 @@ async def play_bowling_vs_game(
         ))
 
 
+async def play_single_slots_game(
+    chat_id: int,
+    user_id: int,
+    nickname: str,
+    amount: float,
+    bet_type: str,
+    bet_config: dict,
+    betting_game: BettingGame,
+    bet_msg: Message = None,
+):
+    """Один бросок 🎰 — покрывает как классические ставки (бар/виноград/лимон/семёрки/
+    любая, через 'values'), так и новые ставки 'уникальные символы' и 'точный исход'
+    (через 'special')."""
+    send_kwargs = {'chat_id': chat_id, 'emoji': '🎰'}
+    if bet_msg:
+        send_kwargs['reply_to_message_id'] = bet_msg.message_id
+
+    dice_message = await betting_game.bot.send_dice(**send_kwargs)
+    dice_value = dice_message.dice.value
+    reels = _slots_reels(dice_value)
+
+    special = bet_config.get('special')
+    if special == 'slots_unique':
+        is_win = len(set(reels)) == 3
+    elif special == 'slots_exact_count':
+        symbol = bet_config.get('symbol')
+        target_count = bet_config.get('count')
+        is_win = reels.count(symbol) == target_count
+    else:
+        is_win = dice_value in bet_config.get('values', [])
+
+    winnings = _apply_game_result(
+        user_id, nickname, amount, is_win, bet_config, betting_game, bet_type=bet_type
+    )
+
+    outcome_label = _get_outcome_label(bet_type, bet_config)
+    text = (
+        _build_win_text(nickname, user_id, amount, outcome_label, winnings)
+        if is_win else _build_lose_text(nickname, user_id, amount, outcome_label)
+    )
+    keyboard = _build_replay_keyboard(user_id, bet_type, amount, bet_config)
+    asyncio.create_task(_delayed_safe_reply(dice_message, text, delay=3.0, reply_markup=keyboard))
+
+
+async def play_double_slots_game(
+    chat_id: int,
+    user_id: int,
+    nickname: str,
+    amount: float,
+    bet_type: str,
+    bet_config: dict,
+    betting_game: BettingGame,
+    bet_msg: Message = None,
+):
+    """2 броска 🎰 подряд (6 барабанов всего) — комбо по выбранному символу до x400,
+    'уникальные' (оба броска без повторов) и 'любые комбо' (оба броска — тройка)."""
+    send_kwargs = {'chat_id': chat_id, 'emoji': '🎰'}
+    if bet_msg:
+        send_kwargs['reply_to_message_id'] = bet_msg.message_id
+    spin1 = await betting_game.bot.send_dice(**send_kwargs)
+    await asyncio.sleep(2)
+
+    spin2_kwargs = {'chat_id': chat_id, 'emoji': '🎰'}
+    if bet_msg:
+        spin2_kwargs['reply_to_message_id'] = bet_msg.message_id
+    spin2 = await betting_game.bot.send_dice(**spin2_kwargs)
+
+    reels1 = _slots_reels(spin1.dice.value)
+    reels2 = _slots_reels(spin2.dice.value)
+    all_reels = list(reels1) + list(reels2)
+
+    special = bet_config.get('special')
+    effective_config = bet_config
+    combo_count = None
+
+    if special == 'double_slots_combo':
+        symbol = bet_config.get('symbol')
+        combo_count = all_reels.count(symbol)
+        mult = SLOTS_2_COMBO_PAYOUTS.get(combo_count, 0.0)
+        is_win = mult > 0
+        if is_win:
+            effective_config = dict(bet_config)
+            effective_config['multiplier'] = mult
+    elif special == 'double_slots_unique':
+        is_win = len(set(reels1)) == 3 and len(set(reels2)) == 3
+    elif special == 'double_slots_any_triple':
+        is_win = (reels1[0] == reels1[1] == reels1[2]) and (reels2[0] == reels2[1] == reels2[2])
+    else:
+        is_win = False
+
+    winnings = _apply_game_result(
+        user_id, nickname, amount, is_win, effective_config, betting_game, bet_type=bet_type
+    )
+
+    outcome_label = _get_outcome_label(bet_type, bet_config)
+    if special == 'double_slots_combo' and is_win and combo_count is not None:
+        outcome_label = f"{outcome_label} — совпадений: {combo_count} (×{SLOTS_2_COMBO_PAYOUTS[combo_count]:g})"
+
+    text = (
+        _build_win_text(nickname, user_id, amount, outcome_label, winnings)
+        if is_win else _build_lose_text(nickname, user_id, amount, outcome_label)
+    )
+    keyboard = _build_replay_keyboard(user_id, bet_type, amount, bet_config)
+    asyncio.create_task(_delayed_safe_reply(spin2, text, delay=3.0, reply_markup=keyboard))
+
+
 async def _run_game(
     chat_id: int,
     user_id: int,
@@ -1479,6 +1674,10 @@ async def _run_game(
         await play_double_bowling_game(chat_id, user_id, nickname, amount, bet_type, bet_config, betting_game, bet_msg)
     elif bet_type.startswith('боулинг_') and bet_config.get('special') == 'bowling_vs':
         await play_bowling_vs_game(chat_id, user_id, nickname, amount, bet_type, bet_config, betting_game, bet_msg)
+    elif bet_type.startswith('слоты2_'):
+        await play_double_slots_game(chat_id, user_id, nickname, amount, bet_type, bet_config, betting_game, bet_msg)
+    elif bet_type.startswith('слоты_'):
+        await play_single_slots_game(chat_id, user_id, nickname, amount, bet_type, bet_config, betting_game, bet_msg)
     else:
         await play_single_dice_game(chat_id, user_id, nickname, amount, bet_type, bet_config, betting_game, bet_msg)
 
@@ -1632,6 +1831,8 @@ async def handle_back_to_menu(callback: CallbackQuery, state: FSMContext):
         'darts':      show_darts_menu,
         'bowling':    show_bowling_menu,
         'bowling2':   show_bowling2_menu,
+        'slots':      show_slots_menu,
+        'slots2':     show_slots2_menu,
     }.get(menu_key)
 
     if handler:
@@ -1746,7 +1947,7 @@ GAME_MAX_MULTIPLIER = {
     'basketball': _max_multiplier(BASKETBALL_BET_TYPES),
     'darts':      _max_multiplier({**DART_BET_TYPES, **DART_2_BET_TYPES}),
     'bowling':    _max_multiplier(BOWLING_BET_TYPES),
-    'slots':      _max_multiplier(SLOTS_BET_TYPES),
+    'slots':      _max_multiplier({**SLOTS_BET_TYPES, **SLOTS_2_BET_TYPES}),
 }
 
 
@@ -2127,35 +2328,105 @@ async def show_darts_menu(callback: CallbackQuery, betting_game: 'BettingGame' =
     await callback.answer()
 
 
-def _build_slots_menu_content(betting_game: 'BettingGame' = None, user_id: int = 0):
+# --- РАЗДЕЛЫ ДЛЯ СЛОТОВ (как в боулинге: «1 бросок» / «2 броска» наверху) ---
+SLOTS_TAB_ORDER = ['1бросок', '2броска']
+
+SLOTS_TAB_EMOJI = {
+    '1бросок': '🎰',
+    '2броска': '🎰🎰',
+}
+
+SLOTS_TAB_LABEL = {
+    '1бросок': '1 бросок',
+    '2броска': '2 броска',
+}
+
+SLOTS_TAB_TITLE = {
+    '1бросок': 'Слоты · 1 бросок',
+    '2броска': 'Слоты · 2 броска',
+}
+
+
+def _slots_tabs_row(active: str) -> list:
+    row = []
+    for key in SLOTS_TAB_ORDER:
+        label = SLOTS_TAB_LABEL[key]
+        text = f"· {label} ·" if key == active else label
+        row.append(InlineKeyboardButton(text=text, callback_data=f"stabs_{key}"))
+    return row
+
+
+def _slots_outcome_rows(active: str) -> list:
     def btn(text: str, bet_type: str) -> InlineKeyboardButton:
         mult = _fmt_mult(SLOTS_BET_TYPES[bet_type]['multiplier'])
         return InlineKeyboardButton(text=f"{text} (x{mult})", callback_data=f"bet_slots_{bet_type}")
 
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        _tabs_row('slots'),
+    def btn2(text: str, bet_type: str) -> InlineKeyboardButton:
+        cfg = SLOTS_2_BET_TYPES[bet_type]
+        mult = _fmt_mult(cfg['multiplier'])
+        prefix = "до " if cfg.get('special') == 'double_slots_combo' else ""
+        return InlineKeyboardButton(text=f"{text} ({prefix}x{mult})", callback_data=f"bet_slots_{bet_type}")
+
+    if active == '2броска':
+        return [
+            [btn2("Комбо BAR", 'слоты2_комбо_бар')],
+            [btn2("🍇 Комбо Виноград", 'слоты2_комбо_виноград')],
+            [btn2("🍋 Комбо Лимон", 'слоты2_комбо_лимон')],
+            [btn2("7️⃣ Комбо Семёрка", 'слоты2_комбо_семерки')],
+            [btn2("Уникальные (оба броска)", 'слоты2_уникальные')],
+            [btn2("Любые 2 комбинации", 'слоты2_любыекомбо')],
+        ]
+    # '1бросок'
+    return [
         [btn("BAR BAR BAR", 'слоты_бар')],
         [btn("🍇 Виноград x3", 'слоты_виноград')],
         [btn("🍋 Лимон x3", 'слоты_лимон')],
         [btn("7️⃣ Семёрки 777", 'слоты_семерки')],
         [btn("Любая комбинация", 'слоты_любая')],
-        [
-            InlineKeyboardButton(text="Назад", callback_data="games", icon_custom_emoji_id=EMOJI_BACK)
-        ]
+        [btn("Уникальные символы", 'слоты_уникальные')],
+        [btn("2× BAR", 'слоты_2бар'), btn("1× BAR", 'слоты_1бар')],
+        [btn("2× Виноград", 'слоты_2виноград'), btn("1× Виноград", 'слоты_1виноград')],
+        [btn("2× Лимон", 'слоты_2лимон'), btn("1× Лимон", 'слоты_1лимон')],
+        [btn("2× Семёрка", 'слоты_2семерки'), btn("1× Семёрка", 'слоты_1семерки')],
+    ]
+
+
+def _build_slots_menu_content(betting_game: 'BettingGame' = None, user_id: int = 0, active: str = '1бросок'):
+    if active not in SLOTS_TAB_ORDER:
+        active = '1бросок'
+    rows = [_tabs_row('slots'), _slots_tabs_row(active)]
+    rows.extend(_slots_outcome_rows(active))
+    rows.append([
+        InlineKeyboardButton(text="Назад", callback_data="games", icon_custom_emoji_id=EMOJI_BACK)
     ])
+    markup = InlineKeyboardMarkup(inline_keyboard=rows)
     header = _bet_balance_block(betting_game, user_id) if betting_game else ""
     text = (
-        f"<blockquote><b>🎰 Слоты</b></blockquote>\n\n"
+        f"<blockquote><b>{SLOTS_TAB_EMOJI[active]} {SLOTS_TAB_TITLE[active]}</b></blockquote>\n\n"
         f"{header}"
         f"<blockquote><b><i>Выберите комбинацию:</i></b></blockquote>\n\n"
     )
     return text, markup
 
 
-async def show_slots_menu(callback: CallbackQuery, betting_game: 'BettingGame' = None):
-    text, markup = _build_slots_menu_content(betting_game, callback.from_user.id)
+async def show_slots_menu(callback: CallbackQuery, betting_game: 'BettingGame' = None, active: str = '1бросок'):
+    text, markup = _build_slots_menu_content(betting_game, callback.from_user.id, active)
     await safe_edit_message(callback, text, reply_markup=markup, parse_mode='HTML')
     await callback.answer()
+
+
+async def show_slots2_menu(callback: CallbackQuery, betting_game: 'BettingGame' = None):
+    """Возврат сразу в раздел «2 броска» (кнопка «Изменить исход» после комбо)."""
+    await show_slots_menu(callback, betting_game, active='2броска')
+
+
+@router.callback_query(F.data.startswith("stabs_"))
+async def slots_tab_switch(callback: CallbackQuery, state: FSMContext):
+    betting_game = get_betting_game()
+    active = callback.data.split("_", 1)[1]
+    if active not in SLOTS_TAB_ORDER:
+        active = '1бросок'
+    await show_slots_menu(callback, betting_game, active)
 
 
 # --- РАЗДЕЛЫ ДЛЯ БОУЛИНГА (как в кубике: «1 бросок» / «2 броска» наверху) ---
