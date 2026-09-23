@@ -203,6 +203,10 @@ DART_BET_TYPES = {
     'дартс_красное': {'values': [2, 4], 'multiplier': 3.0},
     'дартс_мимо':    {'values': [1],    'multiplier': 6.0},
     'дартс_центр':   {'values': [6],    'multiplier': 6.0},
+    # --- новые составные исходы (1 бросок) ---
+    'дартс_сектор':    {'values': [2, 3, 4, 5], 'multiplier': 1.5},   # любой сектор, кроме центра и мимо
+    'дартс_красцентр': {'values': [2, 4, 6],    'multiplier': 2.0},   # красный сектор или центр
+    'дартс_белмимо':   {'values': [1, 3, 5],    'multiplier': 2.0},   # белый сектор или мимо
 }
 
 # --- ТИПЫ СТАВОК ДЛЯ ДВОЙНОГО ДАРТСА (2 броска подряд, по аналогии с футболом/кубами) ---
@@ -211,6 +215,12 @@ DART_2_BET_TYPES = {
     'дартс2_дублькрасное': {'multiplier': 9.0,  'special': 'double_darts_category', 'category': 'дартс_красное'},
     'дартс2_дубльцентр':   {'multiplier': 36.0, 'special': 'double_darts_category', 'category': 'дартс_центр'},
     'дартс2_дубльмимо':    {'multiplier': 36.0, 'special': 'double_darts_category', 'category': 'дартс_мимо'},
+    # --- новые составные исходы (2 броска) ---
+    'дартс2_дубльсектор':    {'multiplier': 2.25, 'special': 'double_darts_category', 'category': 'дартс_сектор'},     # два любых сектора
+    'дартс2_дублькрасцентр': {'multiplier': 4.0,  'special': 'double_darts_category', 'category': 'дартс_красцентр'},  # оба: красное или центр
+    'дартс2_дубльбелмимо':   {'multiplier': 4.0,  'special': 'double_darts_category', 'category': 'дартс_белмимо'},    # оба: белое или мимо
+    'дартс2_светофор': {'multiplier': 3.0, 'special': 'double_darts_svetofor'},  # один бросок красное, другой белое
+    'дартс2_рядом':    {'multiplier': 4.5, 'special': 'double_darts_adjacent'},  # значения бросков соседние (разница = 1)
 }
 
 BOWLING_BET_TYPES = {
@@ -332,8 +342,11 @@ BET_TYPE_TO_CODE = {
     'футбол_центр': 'fb_c', 'футбол_девятка': 'fb_9',
     'футбол_любойдубль': 'fb_d', 'футбол_конкретныйдубль': 'fb_sd',
     'дартс_белое': 'dt_w', 'дартс_красное': 'dt_r', 'дартс_мимо': 'dt_m', 'дартс_центр': 'dt_c',
+    'дартс_сектор': 'dt_s', 'дартс_красцентр': 'dt_rc', 'дартс_белмимо': 'dt_wm',
     'дартс2_дубльбелое': 'dt2_w', 'дартс2_дублькрасное': 'dt2_r',
     'дартс2_дубльцентр': 'dt2_c', 'дартс2_дубльмимо': 'dt2_m',
+    'дартс2_дубльсектор': 'dt2_s', 'дартс2_дублькрасцентр': 'dt2_rc',
+    'дартс2_дубльбелмимо': 'dt2_wm', 'дартс2_светофор': 'dt2_sv', 'дартс2_рядом': 'dt2_adj',
     'боулинг_поражение': 'bw_l', 'боулинг_победа': 'bw_w', 'боулинг_страйк': 'bw_s',
     'боулинг_промах': 'bw_m', 'боулинг_1из6': 'bw_1', 'боулинг_3из6': 'bw_3',
     'боулинг_4из6': 'bw_4', 'боулинг_5из6': 'bw_5',
@@ -367,8 +380,11 @@ _OUTCOME_LABELS = {
     'футбол_штанга': 'Штанга', 'футбол_мимоворот': 'Мимо ворот', 'футбол_угол': 'Гол под углом',
     'футбол_центр': 'Гол в центр', 'футбол_девятка': 'Девятка', 'футбол_любойдубль': 'Любой дубль',
     'дартс_белое': 'Белое', 'дартс_красное': 'Красное', 'дартс_мимо': 'Мимо', 'дартс_центр': 'Центр',
+    'дартс_сектор': 'Любой сектор', 'дартс_красцентр': 'Красное или центр', 'дартс_белмимо': 'Белое или мимо',
     'дартс2_дубльбелое': 'Дубль белое', 'дартс2_дублькрасное': 'Дубль красное',
     'дартс2_дубльцентр': 'Дубль центр', 'дартс2_дубльмимо': 'Дубль мимо',
+    'дартс2_дубльсектор': 'Два любых сектора', 'дартс2_дублькрасцентр': 'Красное/центр ×2',
+    'дартс2_дубльбелмимо': 'Белое/мимо ×2', 'дартс2_светофор': 'Светофор', 'дартс2_рядом': 'Рядом',
     'боулинг_поражение': 'Поражение', 'боулинг_победа': 'Победа', 'боулинг_страйк': 'Страйк',
     'боулинг_промах': 'Промах', 'боулинг_1из6': 'Сбито 1/6', 'боулинг_3из6': 'Сбито 3/6',
     'боулинг_4из6': 'Сбито 4/6', 'боулинг_5из6': 'Сбито 5/6',
@@ -1382,9 +1398,23 @@ async def play_double_darts_game(
     dart1_value = dart1.dice.value
     dart2_value = dart2.dice.value
 
-    category = bet_config.get('category', '')
-    category_values = DART_BET_TYPES.get(category, {}).get('values', [])
-    is_win = dart1_value in category_values and dart2_value in category_values
+    special = bet_config.get('special', 'double_darts_category')
+    if special == 'double_darts_svetofor':
+        # «Светофор»: один бросок попал в красный сектор, другой — в белый (порядок не важен)
+        red_values = DART_BET_TYPES['дартс_красное']['values']
+        white_values = DART_BET_TYPES['дартс_белое']['values']
+        is_win = (
+            (dart1_value in red_values and dart2_value in white_values) or
+            (dart1_value in white_values and dart2_value in red_values)
+        )
+    elif special == 'double_darts_adjacent':
+        # «Рядом»: значения двух бросков соседние по шкале 1..6 (разница ровно 1)
+        is_win = abs(dart1_value - dart2_value) == 1
+    else:
+        # По умолчанию (в т.ч. 'double_darts_category'): оба броска попали в одну и ту же категорию
+        category = bet_config.get('category', '')
+        category_values = DART_BET_TYPES.get(category, {}).get('values', [])
+        is_win = dart1_value in category_values and dart2_value in category_values
 
     winnings = _apply_game_result(
         user_id, nickname, amount, is_win, bet_config, betting_game, bet_type=bet_type
@@ -2454,6 +2484,17 @@ def _darts_outcome_rows(active: str) -> list:
                 InlineKeyboardButton(text="Дубль белое (x9)", callback_data="bet_darts_дартс2_дубльбелое"),
                 InlineKeyboardButton(text="Дубль центр (x36)", callback_data="bet_darts_дартс2_дубльцентр")
             ],
+            [
+                InlineKeyboardButton(text="Два любых сектора (x2.25)", callback_data="bet_darts_дартс2_дубльсектор")
+            ],
+            [
+                InlineKeyboardButton(text="Красное/центр ×2 (x4)", callback_data="bet_darts_дартс2_дублькрасцентр"),
+                InlineKeyboardButton(text="Белое/мимо ×2 (x4)", callback_data="bet_darts_дартс2_дубльбелмимо")
+            ],
+            [
+                InlineKeyboardButton(text="Светофор (x3)", callback_data="bet_darts_дартс2_светофор"),
+                InlineKeyboardButton(text="Рядом (x4.5)", callback_data="bet_darts_дартс2_рядом")
+            ],
         ]
     # '1бросок'
     return [
@@ -2464,6 +2505,13 @@ def _darts_outcome_rows(active: str) -> list:
         [
             InlineKeyboardButton(text="Белое (x3)", callback_data="bet_darts_дартс_белое"),
             InlineKeyboardButton(text="Центр (x6)", callback_data="bet_darts_дартс_центр")
+        ],
+        [
+            InlineKeyboardButton(text="Любой сектор (x1.5)", callback_data="bet_darts_дартс_сектор")
+        ],
+        [
+            InlineKeyboardButton(text="Красное или центр (x2)", callback_data="bet_darts_дартс_красцентр"),
+            InlineKeyboardButton(text="Белое или мимо (x2)", callback_data="bet_darts_дартс_белмимо")
         ],
     ]
 
