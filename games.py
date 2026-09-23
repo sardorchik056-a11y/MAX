@@ -88,13 +88,13 @@ user_last_bet_time: Dict[int, datetime] = {}
 user_current_bet: Dict[int, float] = {}
 
 # Из какого баланса играет игрок: 'real' (по умолчанию) или 'bonus'.
-# 'bonus' включается командой «0.1 бонус», 'real' — командой «0.1$».
+# 'bonus' включается командой «0.1 бонус», 'real' — командой «0.1$» или просто «0.1».
 # Независимо от режима, если реальный баланс меньше MIN_BET, ставка автоматически идёт с бонусного.
 BET_MODE_REAL = 'real'
 BET_MODE_BONUS = 'bonus'
 user_bet_mode: Dict[int, str] = {}
 
-SET_BET_PATTERN = re.compile(r'^\s*(\d+(?:[.,]\d+)?)\s*\$\s*$')
+SET_BET_PATTERN = re.compile(r'^\s*(\d+(?:[.,]\d+)?)\s*\$?\s*$')
 # «0.1 бонус», «0,5 бонус», «1$ бонус», «2 bonus»
 SET_BONUS_BET_PATTERN = re.compile(r'^\s*(\d+(?:[.,]\d+)?)\s*\$?\s*(?:бонус\w*|bonus\w*)\s*$', re.IGNORECASE)
 # «/куб чет 0.1 бонус» — бонусная ставка только на этот раз (режим не меняется)
@@ -513,9 +513,14 @@ def _build_replay_keyboard(user_id: int, bet_type: str, amount: float, bet_confi
     target = bet_config.get('target') if bet_type in ('куб2_конкретныйдубль', 'куб3_конкретныйтрипл', 'футбол_конкретныйдубль', 'баскет_конкретныйдубль', 'боулинг_конкретныйдубль') else None
     target_str = str(target) if target is not None else ''
 
-    def _cb(amt: float) -> str:
+    def _play_cb(amt: float) -> str:
         amt = max(MIN_BET, min(MAX_BET, amt))
         return f"replay:{user_id}:{code}:{amt:.2f}:{target_str}"
+
+    def _adjust_cb(amt: float) -> str:
+        # только меняет сумму в кнопке "Повторить", саму игру не запускает
+        amt = max(MIN_BET, min(MAX_BET, amt))
+        return f"adjust:{user_id}:{code}:{amt:.2f}:{target_str}"
 
     double_amt = min(round(amount * 2, 2), MAX_BET)
     half_amt = max(round(amount / 2, 2), MIN_BET)
@@ -523,14 +528,14 @@ def _build_replay_keyboard(user_id: int, bet_type: str, amount: float, bet_confi
 
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text=f"Повторить ({amount:.2f}$)", callback_data=_cb(amount), icon_custom_emoji_id=EMOJI_REPLAY
+            text=f"Повторить ({amount:.2f}$)", callback_data=_play_cb(amount), icon_custom_emoji_id=EMOJI_REPLAY
         )],
         [
             InlineKeyboardButton(
-                text=f"x2 ({double_amt:.2f}$)", callback_data=_cb(double_amt), icon_custom_emoji_id=EMOJI_RAISE
+                text=f"x2 ({double_amt:.2f}$)", callback_data=_adjust_cb(double_amt), icon_custom_emoji_id=EMOJI_RAISE
             ),
             InlineKeyboardButton(
-                text=f"÷2 ({half_amt:.2f}$)", callback_data=_cb(half_amt), icon_custom_emoji_id=EMOJI_LOWER
+                text=f"÷2 ({half_amt:.2f}$)", callback_data=_adjust_cb(half_amt), icon_custom_emoji_id=EMOJI_LOWER
             ),
         ],
         [InlineKeyboardButton(
@@ -1755,6 +1760,57 @@ def _build_nickname(user) -> str:
     if user.last_name:
         nickname += f" {user.last_name}"
     return nickname.strip() or user.username or "Игрок"
+
+
+@router.callback_query(F.data.startswith("adjust:"))
+async def handle_adjust_bet(callback: CallbackQuery, state: FSMContext):
+    """Кнопки x2/÷2 после игры: НЕ запускают повторную игру, а только меняют
+    сумму, которая будет поставлена по кнопке «Повторить» (и пересчитывают
+    x2/÷2 уже от новой суммы, так что жать можно многократно)."""
+    parts = (callback.data or "").split(":")
+    if len(parts) < 5:
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    _, uid_str, code, amount_str, target_str = parts[:5]
+
+    if str(callback.from_user.id) != uid_str:
+        await callback.answer("🚫 Это не ваша кнопка!", show_alert=True)
+        return
+
+    bet_type = CODE_TO_BET_TYPE.get(code)
+    if not bet_type:
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    betting_game = get_betting_game()
+    bet_config = betting_game.get_bet_config(bet_type) if betting_game else None
+    if not bet_config:
+        await callback.answer("❌ Ошибка конфигурации ставки", show_alert=True)
+        return
+
+    if target_str:
+        try:
+            bet_config = dict(bet_config)
+            bet_config['target'] = int(target_str)
+        except ValueError:
+            pass
+
+    try:
+        amount = float(amount_str)
+    except ValueError:
+        await callback.answer("❌ Ошибка суммы", show_alert=True)
+        return
+
+    amount = max(MIN_BET, min(MAX_BET, amount))
+    user_id = int(uid_str)
+
+    keyboard = _build_replay_keyboard(user_id, bet_type, amount, bet_config)
+    try:
+        await callback.message.edit_reply_markup(reply_markup=keyboard)
+    except Exception:
+        pass
+    await callback.answer(f"Ставка для повтора: {amount:.2f}$")
 
 
 @router.callback_query(F.data.startswith("replay:"))
