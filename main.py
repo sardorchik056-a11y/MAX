@@ -114,6 +114,17 @@ def remember_user(user) -> None:
     }
 
 
+def find_user_id_by_username(username: str) -> int | None:
+    """Ищет user_id по юзернейму (без @, регистр не важен) среди тех, кто уже
+    запускал бота (есть в USER_INFO)."""
+    username = username.lstrip("@").lower()
+    for user_id, info in USER_INFO.items():
+        uname = info.get("username")
+        if uname and uname.lower() == username:
+            return user_id
+    return None
+
+
 def get_display_name(user_id: int) -> str:
     """Ник (имя) пользователя, а если его нет — юзернейм."""
     info = USER_INFO.get(user_id)
@@ -564,7 +575,7 @@ def admin_panel_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="Рассылка", callback_data="admin:broadcast"),
             ],
             [
-                InlineKeyboardButton(text="🔒 Обязательная подписка", callback_data="admin:subs"),
+                InlineKeyboardButton(text="Обязательная подписка", callback_data="admin:subs"),
             ],
             [
                 InlineKeyboardButton(text="Закрыть", callback_data="admin:close"),
@@ -1666,7 +1677,7 @@ async def admin_grant_start(callback: CallbackQuery, state: FSMContext) -> None:
         return
     await state.set_state(AdminStates.grant_user_id)
     await edit_any(callback.message, 
-        "💰 <b>Выдача баланса</b>\n\nВведите ID пользователя, которому начислить баланс:",
+        "💰 <b>Выдача баланса</b>\n\nВведите ID или @username пользователя, которому начислить баланс:",
         reply_markup=admin_cancel_keyboard(),
     )
     await callback.answer()
@@ -1677,11 +1688,19 @@ async def admin_grant_user_id(message: Message, state: FSMContext) -> None:
     if not is_admin(message.from_user.id):
         return
     raw = (message.text or "").strip()
-    if not raw.lstrip("-").isdigit():
-        await message.answer("Некорректный ID. Введите числовой ID пользователя:")
-        return
 
-    await state.update_data(target_user_id=int(raw))
+    if raw.startswith("@") or not raw.lstrip("-").isdigit():
+        target_user_id = find_user_id_by_username(raw)
+        if target_user_id is None:
+            await message.answer(
+                "Пользователь с таким юзернеймом не найден (ещё не запускал бота).\n"
+                "Введите ID или @username пользователя:"
+            )
+            return
+    else:
+        target_user_id = int(raw)
+
+    await state.update_data(target_user_id=target_user_id)
     await state.set_state(AdminStates.grant_amount)
     await message.answer(
         "Введите сумму для начисления (например, 25.5):",
