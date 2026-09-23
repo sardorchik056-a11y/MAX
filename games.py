@@ -2356,7 +2356,7 @@ def _slots_tabs_row(active: str) -> list:
     return row
 
 
-def _slots_outcome_rows(active: str) -> list:
+def _slots_outcome_rows(active: str, sub: Optional[str] = None) -> list:
     def btn(text: str, bet_type: str) -> InlineKeyboardButton:
         mult = _fmt_mult(SLOTS_BET_TYPES[bet_type]['multiplier'])
         return InlineKeyboardButton(text=f"{text} (x{mult})", callback_data=f"bet_slots_{bet_type}")
