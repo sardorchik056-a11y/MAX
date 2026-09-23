@@ -467,11 +467,17 @@ def _menu_key_for(bet_type: str) -> str:
         return 'dice2'
     elif bet_type.startswith('куб_') or bet_type.startswith('куб'):
         return 'dice1'
+    elif bet_type in ('баскет_любойдубль', 'баскет_конкретныйдубль', 'баскет_двагола', 'баскет_двапромаха'):
+        return 'basketball2'
     elif bet_type.startswith('баскет_'):
         return 'basketball'
+    elif bet_type in ('футбол_любойдубль', 'футбол_конкретныйдубль'):
+        return 'football2'
     elif bet_type.startswith('футбол_'):
         return 'football'
-    elif bet_type.startswith('дартс_') or bet_type.startswith('дартс2_'):
+    elif bet_type.startswith('дартс2_'):
+        return 'darts2'
+    elif bet_type.startswith('дартс_'):
         return 'darts'
     elif bet_type in ('боулинг_любойдубль', 'боулинг_конкретныйдубль'):
         return 'bowling2'
@@ -1827,8 +1833,11 @@ async def handle_back_to_menu(callback: CallbackQuery, state: FSMContext):
 
     handler = {
         'basketball': show_basketball_menu,
+        'basketball2': show_basketball2_menu,
         'football':   show_football_menu,
+        'football2':  show_football2_menu,
         'darts':      show_darts_menu,
+        'darts2':     show_darts2_menu,
         'bowling':    show_bowling_menu,
         'bowling2':   show_bowling2_menu,
         'slots':      show_slots_menu,
@@ -2204,9 +2213,52 @@ def _tabs_row(active: str) -> list:
     return row
 
 
-def _build_basketball_menu_content(betting_game: 'BettingGame' = None, user_id: int = 0):
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        _tabs_row('basketball'),
+# --- РАЗДЕЛЫ ДЛЯ БАСКЕТБОЛА («1 бросок» / «2 броска») ---
+BASKETBALL_TAB_ORDER = ['1бросок', '2броска']
+
+BASKETBALL_TAB_EMOJI = {
+    '1бросок': '🏀',
+    '2броска': '🏀🏀',
+}
+
+BASKETBALL_TAB_LABEL = {
+    '1бросок': '1 бросок',
+    '2броска': '2 броска',
+}
+
+BASKETBALL_TAB_TITLE = {
+    '1бросок': 'Баскетбол · 1 бросок',
+    '2броска': 'Баскетбол · 2 броска',
+}
+
+
+def _basketball_tabs_row(active: str) -> list:
+    row = []
+    for key in BASKETBALL_TAB_ORDER:
+        label = BASKETBALL_TAB_LABEL[key]
+        text = f"· {label} ·" if key == active else label
+        row.append(InlineKeyboardButton(text=text, callback_data=f"bktabs_{key}"))
+    return row
+
+
+def _basketball_outcome_rows(active: str) -> list:
+    if active == '2броска':
+        return [
+            [
+                InlineKeyboardButton(text=f"2× {_BASKETBALL_DOUBLE_TARGET_NAME.get(1, '1')} (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_1"),
+                InlineKeyboardButton(text=f"2× {_BASKETBALL_DOUBLE_TARGET_NAME.get(3, '3')} (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_3"),
+                InlineKeyboardButton(text=f"2× {_BASKETBALL_DOUBLE_TARGET_NAME.get(5, '5')} (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_5")
+            ],
+            [
+                InlineKeyboardButton(text="Любой дубль (x5)", callback_data="bet_basketball_баскет_любойдубль")
+            ],
+            [
+                InlineKeyboardButton(text="Два гола (x6.25)", callback_data="bet_basketball_баскет_двагола"),
+                InlineKeyboardButton(text="Два промаха (x2.77)", callback_data="bet_basketball_баскет_двапромаха")
+            ],
+        ]
+    # '1бросок'
+    return [
         [
             InlineKeyboardButton(text="Любой гол (x2.5)", callback_data="bet_basketball_баскет_любойгол"),
             InlineKeyboardButton(text="Чистый гол (x5)", callback_data="bet_basketball_баскет_чистыйгол")
@@ -2218,40 +2270,93 @@ def _build_basketball_menu_content(betting_game: 'BettingGame' = None, user_id: 
             InlineKeyboardButton(text="Отскок (x5)", callback_data="bet_basketball_баскет_отскок"),
             InlineKeyboardButton(text="Застрял (x5)", callback_data="bet_basketball_баскет_застрял")
         ],
-        [
-            InlineKeyboardButton(text=f"2× {_BASKETBALL_DOUBLE_TARGET_NAME.get(1, '1')} (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_1"),
-            InlineKeyboardButton(text=f"2× {_BASKETBALL_DOUBLE_TARGET_NAME.get(3, '3')} (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_3"),
-            InlineKeyboardButton(text=f"2× {_BASKETBALL_DOUBLE_TARGET_NAME.get(5, '5')} (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_5")
-        ],
-        [
-            InlineKeyboardButton(text="Любой дубль (x5)", callback_data="bet_basketball_баскет_любойдубль")
-        ],
-        [
-            InlineKeyboardButton(text="Два гола (x6.25)", callback_data="bet_basketball_баскет_двагола"),
-            InlineKeyboardButton(text="Два промаха (x2.77)", callback_data="bet_basketball_баскет_двапромаха")
-        ],
-        [
-            InlineKeyboardButton(text="Назад", callback_data="games", icon_custom_emoji_id=EMOJI_BACK)
-        ]
+    ]
+
+
+def _build_basketball_menu_content(betting_game: 'BettingGame' = None, user_id: int = 0, active: str = '1бросок'):
+    if active not in BASKETBALL_TAB_ORDER:
+        active = '1бросок'
+    rows = [_tabs_row('basketball'), _basketball_tabs_row(active)]
+    rows.extend(_basketball_outcome_rows(active))
+    rows.append([
+        InlineKeyboardButton(text="Назад", callback_data="games", icon_custom_emoji_id=EMOJI_BACK)
     ])
+    markup = InlineKeyboardMarkup(inline_keyboard=rows)
     header = _bet_balance_block(betting_game, user_id) if betting_game else ""
     text = (
-        f"<blockquote><b>🏀 Баскетбол</b></blockquote>\n\n"
+        f"<blockquote><b>{BASKETBALL_TAB_EMOJI[active]} {BASKETBALL_TAB_TITLE[active]}</b></blockquote>\n\n"
         f"{header}"
         f"<blockquote><b><i>Выберите исход:</i></b></blockquote>\n\n"
     )
     return text, markup
 
 
-async def show_basketball_menu(callback: CallbackQuery, betting_game: 'BettingGame' = None):
-    text, markup = _build_basketball_menu_content(betting_game, callback.from_user.id)
+async def show_basketball_menu(callback: CallbackQuery, betting_game: 'BettingGame' = None, active: str = '1бросок'):
+    text, markup = _build_basketball_menu_content(betting_game, callback.from_user.id, active)
     await safe_edit_message(callback, text, reply_markup=markup, parse_mode='HTML')
     await callback.answer()
 
 
-def _build_football_menu_content(betting_game: 'BettingGame' = None, user_id: int = 0):
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        _tabs_row('football'),
+async def show_basketball2_menu(callback: CallbackQuery, betting_game: 'BettingGame' = None):
+    """Возврат сразу в раздел «2 броска» (кнопка «Изменить исход» после дубля)."""
+    await show_basketball_menu(callback, betting_game, active='2броска')
+
+
+@router.callback_query(F.data.startswith("bktabs_"))
+async def basketball_tab_switch(callback: CallbackQuery, state: FSMContext):
+    betting_game = get_betting_game()
+    active = callback.data.split("_", 1)[1]
+    if active not in BASKETBALL_TAB_ORDER:
+        active = '1бросок'
+    await show_basketball_menu(callback, betting_game, active)
+
+
+# --- РАЗДЕЛЫ ДЛЯ ФУТБОЛА («1 бросок» / «2 броска») ---
+FOOTBALL_TAB_ORDER = ['1бросок', '2броска']
+
+FOOTBALL_TAB_EMOJI = {
+    '1бросок': '⚽',
+    '2броска': '⚽⚽',
+}
+
+FOOTBALL_TAB_LABEL = {
+    '1бросок': '1 бросок',
+    '2броска': '2 броска',
+}
+
+FOOTBALL_TAB_TITLE = {
+    '1бросок': 'Футбол · 1 бросок',
+    '2броска': 'Футбол · 2 броска',
+}
+
+
+def _football_tabs_row(active: str) -> list:
+    row = []
+    for key in FOOTBALL_TAB_ORDER:
+        label = FOOTBALL_TAB_LABEL[key]
+        text = f"· {label} ·" if key == active else label
+        row.append(InlineKeyboardButton(text=text, callback_data=f"fbtabs_{key}"))
+    return row
+
+
+def _football_outcome_rows(active: str) -> list:
+    if active == '2броска':
+        return [
+            [
+                InlineKeyboardButton(text=f"2× {_FOOTBALL_DOUBLE_TARGET_NAME.get(1, '1')} (x23)", callback_data="bet_football_футбол_конкретныйдубль_1"),
+                InlineKeyboardButton(text=f"2× {_FOOTBALL_DOUBLE_TARGET_NAME.get(2, '2')} (x23)", callback_data="bet_football_футбол_конкретныйдубль_2"),
+                InlineKeyboardButton(text=f"2× {_FOOTBALL_DOUBLE_TARGET_NAME.get(3, '3')} (x23)", callback_data="bet_football_футбол_конкретныйдубль_3")
+            ],
+            [
+                InlineKeyboardButton(text=f"2× {_FOOTBALL_DOUBLE_TARGET_NAME.get(4, '4')} (x23)", callback_data="bet_football_футбол_конкретныйдубль_4"),
+                InlineKeyboardButton(text=f"2× {_FOOTBALL_DOUBLE_TARGET_NAME.get(5, '5')} (x23)", callback_data="bet_football_футбол_конкретныйдубль_5")
+            ],
+            [
+                InlineKeyboardButton(text="Любой дубль (x5)", callback_data="bet_football_футбол_любойдубль")
+            ],
+        ]
+    # '1бросок'
+    return [
         [
             InlineKeyboardButton(text="Любой гол (x1.65)", callback_data="bet_football_футбол_гол"),
             InlineKeyboardButton(text="Промах (x2.5)", callback_data="bet_football_футбол_мимо")
@@ -2267,65 +2372,136 @@ def _build_football_menu_content(betting_game: 'BettingGame' = None, user_id: in
         [
             InlineKeyboardButton(text="Девятка (x5)", callback_data="bet_football_футбол_девятка")
         ],
-        [
-            InlineKeyboardButton(text=f"2× {_FOOTBALL_DOUBLE_TARGET_NAME.get(1, '1')} (x23)", callback_data="bet_football_футбол_конкретныйдубль_1"),
-            InlineKeyboardButton(text=f"2× {_FOOTBALL_DOUBLE_TARGET_NAME.get(2, '2')} (x23)", callback_data="bet_football_футбол_конкретныйдубль_2"),
-            InlineKeyboardButton(text=f"2× {_FOOTBALL_DOUBLE_TARGET_NAME.get(3, '3')} (x23)", callback_data="bet_football_футбол_конкретныйдубль_3")
-        ],
-        [
-            InlineKeyboardButton(text=f"2× {_FOOTBALL_DOUBLE_TARGET_NAME.get(4, '4')} (x23)", callback_data="bet_football_футбол_конкретныйдубль_4"),
-            InlineKeyboardButton(text=f"2× {_FOOTBALL_DOUBLE_TARGET_NAME.get(5, '5')} (x23)", callback_data="bet_football_футбол_конкретныйдубль_5")
-        ],
-        [
-            InlineKeyboardButton(text="Любой дубль (x5)", callback_data="bet_football_футбол_любойдубль")
-        ],
-        [
-            InlineKeyboardButton(text="Назад", callback_data="games", icon_custom_emoji_id=EMOJI_BACK)
-        ]
+    ]
+
+
+def _build_football_menu_content(betting_game: 'BettingGame' = None, user_id: int = 0, active: str = '1бросок'):
+    if active not in FOOTBALL_TAB_ORDER:
+        active = '1бросок'
+    rows = [_tabs_row('football'), _football_tabs_row(active)]
+    rows.extend(_football_outcome_rows(active))
+    rows.append([
+        InlineKeyboardButton(text="Назад", callback_data="games", icon_custom_emoji_id=EMOJI_BACK)
     ])
+    markup = InlineKeyboardMarkup(inline_keyboard=rows)
     header = _bet_balance_block(betting_game, user_id) if betting_game else ""
     text = (
-        f"<blockquote><b>⚽ Футбол</b></blockquote>\n\n"
+        f"<blockquote><b>{FOOTBALL_TAB_EMOJI[active]} {FOOTBALL_TAB_TITLE[active]}</b></blockquote>\n\n"
         f"{header}"
         f"<blockquote><b><i>Выберите исход:</i></b></blockquote>\n\n"
     )
     return text, markup
 
 
-async def show_football_menu(callback: CallbackQuery, betting_game: 'BettingGame' = None):
-    text, markup = _build_football_menu_content(betting_game, callback.from_user.id)
+async def show_football_menu(callback: CallbackQuery, betting_game: 'BettingGame' = None, active: str = '1бросок'):
+    text, markup = _build_football_menu_content(betting_game, callback.from_user.id, active)
     await safe_edit_message(callback, text, reply_markup=markup, parse_mode='HTML')
     await callback.answer()
 
 
-def _build_darts_menu_content(betting_game: 'BettingGame' = None, user_id: int = 0):
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        _tabs_row('darts'),
-        [InlineKeyboardButton(text="Мимо (x6)", callback_data="bet_darts_дартс_мимо"),
-         InlineKeyboardButton(text="Красное (x3)", callback_data="bet_darts_дартс_красное")],
-        [InlineKeyboardButton(text="Белое (x3)", callback_data="bet_darts_дартс_белое")],
-        [InlineKeyboardButton(text="Центр (x6)", callback_data="bet_darts_дартс_центр"),
-         InlineKeyboardButton(text="Дубль мимо (x36)", callback_data="bet_darts_дартс2_дубльмимо")],
-        [InlineKeyboardButton(text="Дубль красное (x9)", callback_data="bet_darts_дартс2_дублькрасное")],
-        [InlineKeyboardButton(text="Дубль белое (x9)", callback_data="bet_darts_дартс2_дубльбелое"),
-         InlineKeyboardButton(text="Дубль центр (x36)", callback_data="bet_darts_дартс2_дубльцентр")],
-        [
-            InlineKeyboardButton(text="Назад", callback_data="games", icon_custom_emoji_id=EMOJI_BACK)
+async def show_football2_menu(callback: CallbackQuery, betting_game: 'BettingGame' = None):
+    """Возврат сразу в раздел «2 броска» (кнопка «Изменить исход» после дубля)."""
+    await show_football_menu(callback, betting_game, active='2броска')
+
+
+@router.callback_query(F.data.startswith("fbtabs_"))
+async def football_tab_switch(callback: CallbackQuery, state: FSMContext):
+    betting_game = get_betting_game()
+    active = callback.data.split("_", 1)[1]
+    if active not in FOOTBALL_TAB_ORDER:
+        active = '1бросок'
+    await show_football_menu(callback, betting_game, active)
+
+
+# --- РАЗДЕЛЫ ДЛЯ ДАРТСА («1 бросок» / «2 броска») ---
+DARTS_TAB_ORDER = ['1бросок', '2броска']
+
+DARTS_TAB_EMOJI = {
+    '1бросок': '🎯',
+    '2броска': '🎯🎯',
+}
+
+DARTS_TAB_LABEL = {
+    '1бросок': '1 бросок',
+    '2броска': '2 броска',
+}
+
+DARTS_TAB_TITLE = {
+    '1бросок': 'Дартс · 1 бросок',
+    '2броска': 'Дартс · 2 броска',
+}
+
+
+def _darts_tabs_row(active: str) -> list:
+    row = []
+    for key in DARTS_TAB_ORDER:
+        label = DARTS_TAB_LABEL[key]
+        text = f"· {label} ·" if key == active else label
+        row.append(InlineKeyboardButton(text=text, callback_data=f"drtabs_{key}"))
+    return row
+
+
+def _darts_outcome_rows(active: str) -> list:
+    if active == '2броска':
+        return [
+            [
+                InlineKeyboardButton(text="Дубль мимо (x36)", callback_data="bet_darts_дартс2_дубльмимо"),
+                InlineKeyboardButton(text="Дубль красное (x9)", callback_data="bet_darts_дартс2_дублькрасное")
+            ],
+            [
+                InlineKeyboardButton(text="Дубль белое (x9)", callback_data="bet_darts_дартс2_дубльбелое"),
+                InlineKeyboardButton(text="Дубль центр (x36)", callback_data="bet_darts_дартс2_дубльцентр")
+            ],
         ]
+    # '1бросок'
+    return [
+        [
+            InlineKeyboardButton(text="Мимо (x6)", callback_data="bet_darts_дартс_мимо"),
+            InlineKeyboardButton(text="Красное (x3)", callback_data="bet_darts_дартс_красное")
+        ],
+        [
+            InlineKeyboardButton(text="Белое (x3)", callback_data="bet_darts_дартс_белое"),
+            InlineKeyboardButton(text="Центр (x6)", callback_data="bet_darts_дартс_центр")
+        ],
+    ]
+
+
+def _build_darts_menu_content(betting_game: 'BettingGame' = None, user_id: int = 0, active: str = '1бросок'):
+    if active not in DARTS_TAB_ORDER:
+        active = '1бросок'
+    rows = [_tabs_row('darts'), _darts_tabs_row(active)]
+    rows.extend(_darts_outcome_rows(active))
+    rows.append([
+        InlineKeyboardButton(text="Назад", callback_data="games", icon_custom_emoji_id=EMOJI_BACK)
     ])
+    markup = InlineKeyboardMarkup(inline_keyboard=rows)
     header = _bet_balance_block(betting_game, user_id) if betting_game else ""
     text = (
-        f"<blockquote><b>🎯 Дартс</b></blockquote>\n\n"
+        f"<blockquote><b>{DARTS_TAB_EMOJI[active]} {DARTS_TAB_TITLE[active]}</b></blockquote>\n\n"
         f"{header}"
         f"<blockquote><b><i>Выберите исход:</i></b></blockquote>\n\n"
     )
     return text, markup
 
 
-async def show_darts_menu(callback: CallbackQuery, betting_game: 'BettingGame' = None):
-    text, markup = _build_darts_menu_content(betting_game, callback.from_user.id)
+async def show_darts_menu(callback: CallbackQuery, betting_game: 'BettingGame' = None, active: str = '1бросок'):
+    text, markup = _build_darts_menu_content(betting_game, callback.from_user.id, active)
     await safe_edit_message(callback, text, reply_markup=markup, parse_mode='HTML')
     await callback.answer()
+
+
+async def show_darts2_menu(callback: CallbackQuery, betting_game: 'BettingGame' = None):
+    """Возврат сразу в раздел «2 броска» (кнопка «Изменить исход» после дубля)."""
+    await show_darts_menu(callback, betting_game, active='2броска')
+
+
+@router.callback_query(F.data.startswith("drtabs_"))
+async def darts_tab_switch(callback: CallbackQuery, state: FSMContext):
+    betting_game = get_betting_game()
+    active = callback.data.split("_", 1)[1]
+    if active not in DARTS_TAB_ORDER:
+        active = '1бросок'
+    await show_darts_menu(callback, betting_game, active)
 
 
 # --- РАЗДЕЛЫ ДЛЯ СЛОТОВ (как в боулинге: «1 бросок» / «2 броска» наверху) ---
