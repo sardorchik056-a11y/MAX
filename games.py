@@ -2246,10 +2246,10 @@ def _basketball_outcome_rows(active: str) -> list:
         return [
             [
                 InlineKeyboardButton(text=f"2× {_BASKETBALL_DOUBLE_TARGET_NAME.get(1, '1')} (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_1"),
-                InlineKeyboardButton(text=f"2× {_BASKETBALL_DOUBLE_TARGET_NAME.get(3, '3')} (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_3"),
-                InlineKeyboardButton(text=f"2× {_BASKETBALL_DOUBLE_TARGET_NAME.get(5, '5')} (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_5")
+                InlineKeyboardButton(text=f"2× {_BASKETBALL_DOUBLE_TARGET_NAME.get(3, '3')} (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_3")
             ],
             [
+                InlineKeyboardButton(text=f"2× {_BASKETBALL_DOUBLE_TARGET_NAME.get(5, '5')} (x25)", callback_data="bet_basketball_баскет_конкретныйдубль_5"),
                 InlineKeyboardButton(text="Любой дубль (x5)", callback_data="bet_basketball_баскет_любойдубль")
             ],
             [
@@ -2343,15 +2343,17 @@ def _football_outcome_rows(active: str) -> list:
     if active == '2броска':
         return [
             [
-                InlineKeyboardButton(text=f"2× {_FOOTBALL_DOUBLE_TARGET_NAME.get(1, '1')} (x23)", callback_data="bet_football_футбол_конкретныйдубль_1"),
+                InlineKeyboardButton(text=f"2× {_FOOTBALL_DOUBLE_TARGET_NAME.get(1, '1')} (x23)", callback_data="bet_football_футбол_конкретныйдубль_1")
+            ],
+            [
                 InlineKeyboardButton(text=f"2× {_FOOTBALL_DOUBLE_TARGET_NAME.get(2, '2')} (x23)", callback_data="bet_football_футбол_конкретныйдубль_2"),
                 InlineKeyboardButton(text=f"2× {_FOOTBALL_DOUBLE_TARGET_NAME.get(3, '3')} (x23)", callback_data="bet_football_футбол_конкретныйдубль_3")
             ],
             [
-                InlineKeyboardButton(text=f"2× {_FOOTBALL_DOUBLE_TARGET_NAME.get(4, '4')} (x23)", callback_data="bet_football_футбол_конкретныйдубль_4"),
-                InlineKeyboardButton(text=f"2× {_FOOTBALL_DOUBLE_TARGET_NAME.get(5, '5')} (x23)", callback_data="bet_football_футбол_конкретныйдубль_5")
+                InlineKeyboardButton(text=f"2× {_FOOTBALL_DOUBLE_TARGET_NAME.get(4, '4')} (x23)", callback_data="bet_football_футбол_конкретныйдубль_4")
             ],
             [
+                InlineKeyboardButton(text=f"2× {_FOOTBALL_DOUBLE_TARGET_NAME.get(5, '5')} (x23)", callback_data="bet_football_футбол_конкретныйдубль_5"),
                 InlineKeyboardButton(text="Любой дубль (x5)", callback_data="bet_football_футбол_любойдубль")
             ],
         ]
@@ -2544,16 +2546,11 @@ def _slots_outcome_rows(active: str, sub: Optional[str] = None) -> list:
         return InlineKeyboardButton(text=f"{text} ({prefix}x{mult})", callback_data=f"bet_slots_{bet_type}")
 
     if active == '2броска':
-        if sub == 'combo':
-            # Подраздел «Комбо до x400» — выбор символа, открывается отдельной кнопкой
-            return [
-                [btn2("BAR", 'слоты2_комбо_бар'), btn2("Виноград", 'слоты2_комбо_виноград')],
-                [btn2("Лимон", 'слоты2_комбо_лимон'), btn2("Семёрка", 'слоты2_комбо_семерки')],
-            ]
-        combo_mult = _fmt_mult(SLOTS_2_BET_TYPES['слоты2_комбо_бар']['multiplier'])
         return [
-            [btn2("Уникальные (оба броска)", 'слоты2_уникальные'), btn2("Любые 2 комбинации", 'слоты2_любыекомбо')],
-            [InlineKeyboardButton(text=f"Комбо (до x{combo_mult})", callback_data="ssub_2броска_combo")],
+            [btn2("Уникальные (оба броска)", 'слоты2_уникальные')],
+            [btn2("Любые 2 комбинации", 'слоты2_любыекомбо')],
+            [btn2("BAR", 'слоты2_комбо_бар'), btn2("Виноград", 'слоты2_комбо_виноград')],
+            [btn2("Лимон", 'слоты2_комбо_лимон'), btn2("Семёрка", 'слоты2_комбо_семерки')],
         ]
     # '1бросок'
     if sub == 'exact':
@@ -2578,7 +2575,7 @@ def _build_slots_menu_content(betting_game: 'BettingGame' = None, user_id: int =
         active = '1бросок'
     if active == '1бросок' and sub not in (None, 'exact'):
         sub = None
-    if active == '2броска' and sub not in (None, 'combo'):
+    if active == '2броска':
         sub = None
 
     rows = [_tabs_row('slots'), _slots_tabs_row(active)]
