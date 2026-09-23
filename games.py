@@ -2062,6 +2062,10 @@ def build_games_selector_keyboard() -> InlineKeyboardMarkup:
     rows.append([
         InlineKeyboardButton(text="Авторские", callback_data="custom_games_menu", icon_custom_emoji_id=EMOJI_MAGNIFY)
     ])
+    rows.append([
+        InlineKeyboardButton(text="CHAT", callback_data="chat_menu", icon_custom_emoji_id="5443038326535759644"),
+        InlineKeyboardButton(text="NEWS", callback_data="news_menu", icon_custom_emoji_id="5424818078833715060"),
+    ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -3074,7 +3078,7 @@ _BET_CALLBACK_PREFIXES = (
     "bet_basketball_", "bet_football_", "bet_darts_", "bet_bowling_", "bet_slots_",
 )
 
-_IN_DEV_GAME_CALLBACKS = {"custom_games_menu"}
+_IN_DEV_GAME_CALLBACKS = {"custom_games_menu", "chat_menu", "news_menu"}
 
 _IN_DEV_GAME_TEXT = "🚧 Этот раздел находится в разработке.\nСкоро здесь появится функционал!"
 
