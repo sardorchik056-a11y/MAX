@@ -2368,49 +2368,66 @@ def _slots_outcome_rows(active: str) -> list:
         return InlineKeyboardButton(text=f"{text} ({prefix}x{mult})", callback_data=f"bet_slots_{bet_type}")
 
     if active == '2броска':
+        if sub == 'combo':
+            # Подраздел «Комбо до x400» — выбор символа, открывается отдельной кнопкой
+            return [
+                [btn2("BAR", 'слоты2_комбо_бар'), btn2("Виноград", 'слоты2_комбо_виноград')],
+                [btn2("Лимон", 'слоты2_комбо_лимон'), btn2("Семёрка", 'слоты2_комбо_семерки')],
+            ]
+        combo_mult = _fmt_mult(SLOTS_2_BET_TYPES['слоты2_комбо_бар']['multiplier'])
         return [
-            [btn2("Комбо BAR", 'слоты2_комбо_бар')],
-            [btn2("🍇 Комбо Виноград", 'слоты2_комбо_виноград')],
-            [btn2("🍋 Комбо Лимон", 'слоты2_комбо_лимон')],
-            [btn2("7️⃣ Комбо Семёрка", 'слоты2_комбо_семерки')],
-            [btn2("Уникальные (оба броска)", 'слоты2_уникальные')],
-            [btn2("Любые 2 комбинации", 'слоты2_любыекомбо')],
+            [btn2("Уникальные (оба броска)", 'слоты2_уникальные'), btn2("Любые 2 комбинации", 'слоты2_любыекомбо')],
+            [InlineKeyboardButton(text=f"Комбо (до x{combo_mult})", callback_data="ssub_2броска_combo")],
         ]
     # '1бросок'
+    if sub == 'exact':
+        # Подраздел «Точный исход до x7.11» — 2х/1х по каждому символу
+        return [
+            [btn("2× BAR", 'слоты_2бар'), btn("1× BAR", 'слоты_1бар')],
+            [btn("2× Виноград", 'слоты_2виноград'), btn("1× Виноград", 'слоты_1виноград')],
+            [btn("2× Лимон", 'слоты_2лимон'), btn("1× Лимон", 'слоты_1лимон')],
+            [btn("2× Семёрка", 'слоты_2семерки'), btn("1× Семёрка", 'слоты_1семерки')],
+        ]
+    exact_mult = _fmt_mult(SLOTS_BET_TYPES['слоты_2бар']['multiplier'])
     return [
-        [btn("BAR BAR BAR", 'слоты_бар')],
-        [btn("🍇 Виноград x3", 'слоты_виноград')],
-        [btn("🍋 Лимон x3", 'слоты_лимон')],
-        [btn("7️⃣ Семёрки 777", 'слоты_семерки')],
-        [btn("Любая комбинация", 'слоты_любая')],
-        [btn("Уникальные символы", 'слоты_уникальные')],
-        [btn("2× BAR", 'слоты_2бар'), btn("1× BAR", 'слоты_1бар')],
-        [btn("2× Виноград", 'слоты_2виноград'), btn("1× Виноград", 'слоты_1виноград')],
-        [btn("2× Лимон", 'слоты_2лимон'), btn("1× Лимон", 'слоты_1лимон')],
-        [btn("2× Семёрка", 'слоты_2семерки'), btn("1× Семёрка", 'слоты_1семерки')],
+        [btn("BAR BAR BAR", 'слоты_бар'), btn("Виноград x3", 'слоты_виноград')],
+        [btn("Лимон x3", 'слоты_лимон'), btn("Семёрки 777", 'слоты_семерки')],
+        [btn("Любая комбинация", 'слоты_любая'), btn("Уникальные символы", 'слоты_уникальные')],
+        [InlineKeyboardButton(text=f"Точный исход (до x{exact_mult})", callback_data="ssub_1бросок_exact")],
     ]
 
 
-def _build_slots_menu_content(betting_game: 'BettingGame' = None, user_id: int = 0, active: str = '1бросок'):
+def _build_slots_menu_content(betting_game: 'BettingGame' = None, user_id: int = 0, active: str = '1бросок', sub: Optional[str] = None):
     if active not in SLOTS_TAB_ORDER:
         active = '1бросок'
+    if active == '1бросок' and sub not in (None, 'exact'):
+        sub = None
+    if active == '2броска' and sub not in (None, 'combo'):
+        sub = None
+
     rows = [_tabs_row('slots'), _slots_tabs_row(active)]
-    rows.extend(_slots_outcome_rows(active))
-    rows.append([
-        InlineKeyboardButton(text="Назад", callback_data="games", icon_custom_emoji_id=EMOJI_BACK)
-    ])
+    rows.extend(_slots_outcome_rows(active, sub))
+    if sub:
+        rows.append([
+            InlineKeyboardButton(text="Назад", callback_data=f"stabs_{active}", icon_custom_emoji_id=EMOJI_BACK)
+        ])
+    else:
+        rows.append([
+            InlineKeyboardButton(text="Назад", callback_data="games", icon_custom_emoji_id=EMOJI_BACK)
+        ])
     markup = InlineKeyboardMarkup(inline_keyboard=rows)
     header = _bet_balance_block(betting_game, user_id) if betting_game else ""
+    sub_title = " · Точный исход" if sub == 'exact' else (" · Комбо" if sub == 'combo' else "")
     text = (
-        f"<blockquote><b>{SLOTS_TAB_EMOJI[active]} {SLOTS_TAB_TITLE[active]}</b></blockquote>\n\n"
+        f"<blockquote><b>{SLOTS_TAB_EMOJI[active]} {SLOTS_TAB_TITLE[active]}{sub_title}</b></blockquote>\n\n"
         f"{header}"
         f"<blockquote><b><i>Выберите комбинацию:</i></b></blockquote>\n\n"
     )
     return text, markup
 
 
-async def show_slots_menu(callback: CallbackQuery, betting_game: 'BettingGame' = None, active: str = '1бросок'):
-    text, markup = _build_slots_menu_content(betting_game, callback.from_user.id, active)
+async def show_slots_menu(callback: CallbackQuery, betting_game: 'BettingGame' = None, active: str = '1бросок', sub: Optional[str] = None):
+    text, markup = _build_slots_menu_content(betting_game, callback.from_user.id, active, sub)
     await safe_edit_message(callback, text, reply_markup=markup, parse_mode='HTML')
     await callback.answer()
 
@@ -2427,6 +2444,20 @@ async def slots_tab_switch(callback: CallbackQuery, state: FSMContext):
     if active not in SLOTS_TAB_ORDER:
         active = '1бросок'
     await show_slots_menu(callback, betting_game, active)
+
+
+@router.callback_query(F.data.startswith("ssub_"))
+async def slots_submenu_open(callback: CallbackQuery, state: FSMContext):
+    """Открывает подраздел «Точный исход» (1 бросок) или «Комбо» (2 броска)."""
+    betting_game = get_betting_game()
+    parts = callback.data.split("_", 2)  # ['ssub', active, sub]
+    if len(parts) != 3:
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+    _, active, sub = parts
+    if active not in SLOTS_TAB_ORDER:
+        active = '1бросок'
+    await show_slots_menu(callback, betting_game, active, sub)
 
 
 # --- РАЗДЕЛЫ ДЛЯ БОУЛИНГА (как в кубике: «1 бросок» / «2 броска» наверху) ---
