@@ -282,6 +282,25 @@ class CryptoBotClient:
         return ProviderPayout(str(result.get("transfer_id") or spend_id), "paid")
 
 
+    async def get_balances(self) -> list[dict]:
+        """Сырые остатки приложения: [{currency_code, available, onhold}, ...]."""
+        result = await self._call("getBalance")
+        return result if isinstance(result, list) else []
+
+    async def get_exchange_rates_usd(self) -> dict[str, float]:
+        """{currency_code: курс_в_USD} — только валюты с target == 'USD'."""
+        result = await self._call("getExchangeRates")
+        rates: dict[str, float] = {}
+        for item in result if isinstance(result, list) else []:
+            if not isinstance(item, dict) or item.get("target") != "USD":
+                continue
+            try:
+                rates[str(item["source"])] = float(item["rate"])
+            except (TypeError, ValueError, KeyError):
+                continue
+        return rates
+
+
 # --------------------------------------------------------------------------
 # xRocket — Pay API (Bearer-токен)
 # --------------------------------------------------------------------------
@@ -399,6 +418,12 @@ class XRocketClient:
             self._last_pget = time.monotonic()
         data = await self._call("GET", "/api/v1/payout", params={"payoutId": payout_id})
         return _normalize_payout_status(data.get("status")) if isinstance(data, dict) else None
+
+
+    async def get_app_info(self) -> dict:
+        """Название приложения, комиссия и остатки: GET /api/v1/app/info."""
+        data = await self._call("GET", "/api/v1/app/info")
+        return data if isinstance(data, dict) else {}
 
 
 cryptobot = CryptoBotClient(CRYPTOBOT_TOKEN, CRYPTOBOT_TESTNET)
@@ -1008,20 +1033,11 @@ router = Router()
 
 # --------------------------------------------------------------------------
 # Казна / резерв — команды «казна», «kazna», «резерв», «reserve» (со слешем
-# и без) показывают админу сводку по остаткам на провайдерах. Ни CryptoBot,
-# ни xRocket здесь не спрашиваются "вживую" про баланс приложения — цифры
-# ниже админ обновляет руками по факту (см. TREASURY_* константы).
+# и без) показывают админу ЖИВОЙ остаток на провайдерах: CryptoBot — через
+# getBalance + getExchangeRates, xRocket — через GET /app/info. Курс xRocket
+# оценивается по курсам CryptoBot (совпадающие коды активов: USDT, TON, TRX...),
+# USDT всегда считается 1:1 к доллару.
 # --------------------------------------------------------------------------
-
-# CryptoBot: общий остаток в долларах и доля в USDT — остальное поровну
-# считается как TRX/TON (Gram).
-TREASURY_CRYPTOBOT_TOTAL_USD = 3567.56
-TREASURY_CRYPTOBOT_USDT_SHARE = 0.47  # 47% в USDT, остаток пополам TRX/TON
-
-# xRocket: общий остаток в долларах + отдельно остаток в TON (Gram) —
-# без привязки к курсу, просто как есть в приложении.
-TREASURY_XROCKET_TOTAL_USD = 5436.76
-TREASURY_XROCKET_TON_AMOUNT = 2553
 
 TREASURY_TRIGGERS = ("казна", "kazna", "резерв", "reserve")
 _TREASURY_RE = re.compile(
@@ -1030,26 +1046,117 @@ _TREASURY_RE = re.compile(
 )
 
 
-def _treasury_text() -> str:
-    cb_total = TREASURY_CRYPTOBOT_TOTAL_USD
-    cb_usdt = cb_total * TREASURY_CRYPTOBOT_USDT_SHARE
-    cb_rest = cb_total - cb_usdt
-    cb_trx = cb_rest / 2
-    cb_ton = cb_rest - cb_trx
+def _fmt_amount(value: float) -> str:
+    """«1,676.75», «2,553» (без лишних нулей), «0.00003142» — компактно, но точно."""
+    text = f"{value:,.8f}".rstrip("0").rstrip(".")
+    return text or "0"
 
-    xr_total = TREASURY_XROCKET_TOTAL_USD
-    grand_total = cb_total + xr_total
 
-    return (
-        "🏦 <b>Баланс казны</b>\n\n"
-        f"{_provider_label(cryptobot)} — <b>{_fmt_usd(cb_total)}</b>\n"
-        f"┌ USDT ({TREASURY_CRYPTOBOT_USDT_SHARE * 100:.0f}%): <b>{_fmt_usd(cb_usdt)}</b>\n"
-        f"├ TRX: <b>{_fmt_usd(cb_trx)}</b>\n"
-        f"└ TON (Gram): <b>{_fmt_usd(cb_ton)}</b>\n\n"
-        f"{_provider_label(xrocket)} — <b>{_fmt_usd(xr_total)}</b>\n"
-        f"└ TON (Gram): <b>{TREASURY_XROCKET_TON_AMOUNT:,}</b>\n\n"
-        f"💰 <b>Итого:</b> {_fmt_usd(grand_total)}"
-    )
+def _tree_lines(rows: list[str]) -> list[str]:
+    """Оформляет список строк веткой ┌ ├ └, как в остальных сводках бота."""
+    if not rows:
+        return []
+    if len(rows) == 1:
+        return [f"└ {rows[0]}"]
+    return [f"┌ {rows[0]}", *(f"├ {r}" for r in rows[1:-1]), f"└ {rows[-1]}"]
+
+
+async def _cryptobot_snapshot(rates_usd: dict[str, float]) -> tuple[list[tuple[str, float]], float | None, str | None]:
+    """(остатки по активам, итог в $ или None, текст ошибки или None)."""
+    try:
+        balances = await cryptobot.get_balances()
+    except PaymentError as ex:
+        return [], None, str(ex)
+
+    items: list[tuple[str, float]] = []
+    total, have_total = 0.0, False
+    for row in balances:
+        if not isinstance(row, dict):
+            continue
+        code = str(row.get("currency_code") or "").upper()
+        try:
+            amount = float(row.get("available") or 0)
+        except (TypeError, ValueError):
+            continue
+        if amount <= 0:
+            continue
+        items.append((code, amount))
+        rate = rates_usd.get(code) or (1.0 if code == "USDT" else None)
+        if rate is not None:
+            total += amount * rate
+            have_total = True
+    items.sort(key=lambda x: -x[1])
+    return items, (total if have_total else None), None
+
+
+async def _xrocket_snapshot(rates_usd: dict[str, float]) -> tuple[list[tuple[str, float]], float | None, str | None]:
+    try:
+        info = await xrocket.get_app_info()
+    except PaymentError as ex:
+        return [], None, str(ex)
+
+    items: list[tuple[str, float]] = []
+    total, have_total = 0.0, False
+    for row in (info.get("balances") or []):
+        if not isinstance(row, dict):
+            continue
+        code = str(row.get("currency") or row.get("currency_code") or "").upper()
+        try:
+            amount = float(row.get("balance") or 0)
+        except (TypeError, ValueError):
+            continue
+        if amount <= 0:
+            continue
+        items.append((code, amount))
+        rate = rates_usd.get(code) or (1.0 if code == "USDT" else None)
+        if rate is not None:
+            total += amount * rate
+            have_total = True
+    items.sort(key=lambda x: -x[1])
+    return items, (total if have_total else None), None
+
+
+def _treasury_section(provider: CryptoBotClient | XRocketClient, items: list[tuple[str, float]],
+                       total_usd: float | None, error: str | None) -> str:
+    label = _provider_label(provider)
+    if not provider.configured:
+        return f"{label}\n└ <i>провайдер не настроен</i>"
+    if error:
+        return f"{label}\n└ ⚠️ <i>не удалось получить баланс: {html.escape(error)}</i>"
+    if not items:
+        return f"{label} — <b>{_fmt_usd(0)}</b>\n└ <i>баланс пуст</i>"
+
+    head = label + (f" — <b>{_fmt_usd(total_usd)}</b>" if total_usd is not None else " — <i>оценить в $ не удалось</i>")
+    rows = [f"{code}: <b>{_fmt_amount(amount)}</b>" for code, amount in items]
+    return "\n".join([head, *_tree_lines(rows)])
+
+
+async def _treasury_text() -> str:
+    rates_usd: dict[str, float] = {}
+    if cryptobot.configured:
+        try:
+            rates_usd = await cryptobot.get_exchange_rates_usd()
+        except PaymentError:
+            rates_usd = {}
+
+    cb_items, cb_total, cb_err = await _cryptobot_snapshot(rates_usd) if cryptobot.configured else ([], None, None)
+    xr_items, xr_total, xr_err = await _xrocket_snapshot(rates_usd) if xrocket.configured else ([], None, None)
+
+    parts = [
+        "🏦 <b>Баланс казны</b>",
+        "",
+        _treasury_section(cryptobot, cb_items, cb_total, cb_err),
+        "",
+        _treasury_section(xrocket, xr_items, xr_total, xr_err),
+    ]
+
+    known_totals = [t for t in (cb_total, xr_total) if t is not None]
+    if known_totals:
+        parts += ["", f"💰 <b>Итого:</b> {_fmt_usd(sum(known_totals))}"]
+        if len(known_totals) < sum(1 for p in (cryptobot, xrocket) if p.configured):
+            parts.append("<i>Часть остатков не оценена в $ — сумма может быть неполной.</i>")
+
+    return "\n".join(parts)
 
 
 @router.message(F.text.regexp(_TREASURY_RE))
@@ -1058,7 +1165,16 @@ async def treasury_command(message: Message) -> None:
     # чтобы не палить сам факт существования команды.
     if message.from_user.id not in ALERT_ADMIN_IDS:
         return
-    await message.answer(_treasury_text())
+    status = await message.answer("🏦 Запрашиваю баланс казны…")
+    try:
+        text = await _treasury_text()
+    except Exception:
+        log.exception("Не удалось получить баланс казны")
+        text = "🏦 <b>Баланс казны</b>\n\n⚠️ Не удалось получить данные, попробуйте ещё раз позже."
+    try:
+        await status.edit_text(text)
+    except Exception:
+        await message.answer(text)
 
 
 class DepositStates(StatesGroup):
