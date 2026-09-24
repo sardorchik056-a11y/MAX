@@ -1245,15 +1245,15 @@ def _display_name(user) -> str:
     return str(user.id)
 
 
-def _combined_invoice_text(amount: float) -> str:
+def _combined_invoice_text(amount: float, user) -> str:
     minutes = INVOICE_TTL_SECONDS // 60
     return (
         f"{DEPOSIT_ICON} <b>Счёт на пополнение создан</b>\n\n"
-        f"┌ Сумма: <b>{_fmt_usd(amount)}</b>\n"
+        f"┌ Игрок: <b>{html.escape(_display_name(user))}</b>\n"
+        f"├ Сумма: <b>{_fmt_usd(amount)}</b>\n"
         f"└ Действует: <b>{minutes} мин</b>\n\n"
         "<i>Выберите способ оплаты ниже — баланс пополнится автоматически, "
-        "как только оплатите любым из них. Проверка идёт в фоне сама, "
-        "кнопка «Проверить оплату» — если хотите ускорить.</i>"
+        "как только оплатите любым из них.</i>"
     )
 
 
@@ -1262,10 +1262,6 @@ def _combined_invoice_keyboard(invoices: list[tuple[Any, int, str]]) -> InlineKe
         [InlineKeyboardButton(text=f"Оплатить · {provider.title}", url=pay_url, icon_custom_emoji_id=provider.emoji_id)]
         for provider, _dep_id, pay_url in invoices
     ]
-    ids = ":".join(str(dep_id) for _provider, dep_id, _pay_url in invoices)
-    rows.append(
-        [InlineKeyboardButton(text="Проверить оплату", callback_data=f"dep:cg:{ids}", icon_custom_emoji_id=EMOJI_CHECK)]
-    )
     rows.append(_back_button("menu:profile"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -1311,9 +1307,10 @@ async def deposit_quick_command(message: Message, state: FSMContext) -> None:
         return
 
     # Оба провайдера доступны — один счёт у каждого, но ОДНО общее сообщение
-    # с двумя кнопками «Оплатить» и одной кнопкой «Проверить оплату» сразу для
-    # обеих. group_id связывает пару: как только один оплачен, второй
-    # автоматически «гасится», чтобы не зачислить сумму дважды (см. _db_claim_paid).
+    # с двумя кнопками «Оплатить» (без кнопки проверки — зачисление полностью
+    # автоматическое через фоновые watcher'ы). group_id связывает пару: как
+    # только один счёт оплачен, второй сразу «гасится», чтобы не зачислить
+    # сумму дважды (см. _db_claim_paid).
     group_id = uuid.uuid4().hex
     invoices: list[tuple[Any, int, str]] = []
     errors: list[str] = []
@@ -1336,63 +1333,13 @@ async def deposit_quick_command(message: Message, state: FSMContext) -> None:
         )
         return
 
-    sent = await message.answer(_combined_invoice_text(amount), reply_markup=_combined_invoice_keyboard(invoices))
+    sent = await message.answer(_combined_invoice_text(amount, message.from_user), reply_markup=_combined_invoice_keyboard(invoices))
     for provider, dep_id, _pay_url in invoices:
         await _run(_db_set_message, dep_id, sent.chat.id, sent.message_id)
         if provider.key == xrocket.key:
             _xr_wake.set()
     if errors:
         await message.answer("\n".join(errors))
-
-
-@router.callback_query(F.data.startswith("dep:cg:"))
-async def deposit_check_combined(callback: CallbackQuery) -> None:
-    """«Проверить оплату» для комбинированного счёта (dep:cg:id1:id2) — проверяет
-    оба счёта пары и применяет статус первого найденного оплаченным."""
-    try:
-        dep_ids = [int(x) for x in callback.data.split(":")[2:] if x]
-    except ValueError:
-        await callback.answer("Некорректный запрос", show_alert=True)
-        return
-    if not dep_ids:
-        await callback.answer("Счёт не найден", show_alert=True)
-        return
-
-    rows = [await _run(_db_get, dep_id) for dep_id in dep_ids]
-    rows = [r for r in rows if r is not None and r["user_id"] == callback.from_user.id]
-    if not rows:
-        await callback.answer("Счёт не найден", show_alert=True)
-        return
-    if any(r["status"] == "paid" for r in rows):
-        await callback.answer("Этот счёт уже оплачен и зачислен", show_alert=True)
-        return
-
-    now = time.monotonic()
-    if now - _last_check_press.get(callback.from_user.id, 0) < CHECK_BUTTON_COOLDOWN_SECONDS:
-        await callback.answer("Подождите пару секунд…")
-        return
-    _last_check_press[callback.from_user.id] = now
-
-    found_paid = False
-    all_expired = True
-    for dep_id in dep_ids:
-        try:
-            status = await check_deposit(callback.bot, dep_id)
-        except PaymentError as ex:
-            await callback.answer(f"Не удалось проверить: {ex}", show_alert=True)
-            return
-        if status == "paid":
-            found_paid = True
-            break
-        if status != "expired":
-            all_expired = False
-
-    if found_paid:
-        await callback.answer("Оплата получена, баланс пополнен")
-    elif all_expired:
-        await callback.answer("Счета истекли, создайте новый", show_alert=True)
-    else:
-        await callback.answer("Оплата пока не найдена. Оплатите счёт и нажмите снова.", show_alert=True)
 
 
 @router.message(F.text.regexp(_TRANSFER_RE))
