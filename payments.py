@@ -420,10 +420,18 @@ class XRocketClient:
         return _normalize_payout_status(data.get("status")) if isinstance(data, dict) else None
 
 
-    async def get_app_info(self) -> dict:
-        """Название приложения, комиссия и остатки: GET /api/v1/app/info."""
-        data = await self._call("GET", "/api/v1/app/info")
-        return data if isinstance(data, dict) else {}
+    async def get_balances(self) -> list[dict]:
+        """Остатки приложения по валютам: GET /api/v1/balances.
+        Возвращает список объектов вида {currency, balance} (или под ключом
+        "balances" — обрабатываем оба варианта на случай изменений в API)."""
+        data = await self._call("GET", "/api/v1/balances")
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            inner = data.get("balances") or data.get("data")
+            if isinstance(inner, list):
+                return inner
+        return []
 
 
 cryptobot = CryptoBotClient(CRYPTOBOT_TOKEN, CRYPTOBOT_TESTNET)
@@ -1091,18 +1099,18 @@ async def _cryptobot_snapshot(rates_usd: dict[str, float]) -> tuple[list[tuple[s
 
 async def _xrocket_snapshot(rates_usd: dict[str, float]) -> tuple[list[tuple[str, float]], float | None, str | None]:
     try:
-        info = await xrocket.get_app_info()
+        balances = await xrocket.get_balances()
     except PaymentError as ex:
         return [], None, str(ex)
 
     items: list[tuple[str, float]] = []
     total, have_total = 0.0, False
-    for row in (info.get("balances") or []):
+    for row in balances:
         if not isinstance(row, dict):
             continue
         code = str(row.get("currency") or row.get("currency_code") or "").upper()
         try:
-            amount = float(row.get("balance") or 0)
+            amount = float(row.get("balance") if row.get("balance") is not None else row.get("available") or 0)
         except (TypeError, ValueError):
             continue
         if amount <= 0:
