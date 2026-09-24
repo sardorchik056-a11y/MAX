@@ -1149,6 +1149,186 @@ async def treasury_command(message: Message) -> None:
         await message.answer(text)
 
 
+# --------------------------------------------------------------------------
+# Быстрые текстовые команды: «бал», «деп [сумма]», «нк <сумма>» (со слешем
+# и без, регистр не важен). Сделаны, чтобы не лезть в меню каждый раз:
+#   бал / б / b / bal / balance   — показать баланс сообщением;
+#   деп / депозит / пополнить     — без суммы: открыть выбор способа оплаты;
+#                                    с суммой («деп 10»): сразу создать ДВА
+#                                    счёта на эту сумму — CryptoBot и xRocket,
+#                                    игрок оплачивает любой удобный;
+#   нк <сумма>  (ответом на сообщение) — мгновенный перевод части своего
+#                                    баланса игроку, чьё сообщение зацитировано.
+# --------------------------------------------------------------------------
+
+BALANCE_TRIGGERS = ("баланс", "бал", "balance", "bal", "б", "b")
+_BALANCE_RE = re.compile(
+    r"^/?(?:" + "|".join(re.escape(t) for t in BALANCE_TRIGGERS) + r")(?:@\w+)?\s*$",
+    re.IGNORECASE,
+)
+
+DEPOSIT_TRIGGERS = ("депозит", "деп", "пополнить", "deposit", "dep")
+_DEPOSIT_RE = re.compile(
+    r"^/?(?:" + "|".join(re.escape(t) for t in DEPOSIT_TRIGGERS) + r")(?:@\w+)?"
+    r"(?:[\s:]+(?P<amount>\d+(?:[.,]\d+)?))?\s*$",
+    re.IGNORECASE,
+)
+
+TRANSFER_TRIGGERS = ("нк", "nk")
+_TRANSFER_RE = re.compile(
+    r"^/?(?:" + "|".join(re.escape(t) for t in TRANSFER_TRIGGERS) + r")(?:@\w+)?"
+    r"\s+(?P<amount>\d+(?:[.,]\d+)?)\s*$",
+    re.IGNORECASE,
+)
+
+MIN_TRANSFER_USD = 0.01
+MAX_TRANSFER_USD = 10000.0
+TRANSFER_DEBIT_KIND = "transfer_out"   # списывающая причина, см. storage._DEDUCT_REASONS
+TRANSFER_CREDIT_KIND = "transfer_in"
+
+EMOJI_BALANCE = "💰"
+EMOJI_TRANSFER = "🎁"
+
+
+def _balance_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Пополнить", callback_data="profile:deposit", icon_custom_emoji_id=EMOJI_DEPOSIT)],
+            [InlineKeyboardButton(text="Вывести", callback_data="profile:withdraw", icon_custom_emoji_id=EMOJI_WITHDRAW)],
+        ]
+    )
+
+
+@router.message(F.text.regexp(_BALANCE_RE))
+async def balance_command(message: Message) -> None:
+    stats = get_profile_stats(message.from_user.id)
+    text = (
+        f"{EMOJI_BALANCE} <b>Баланс</b>\n\n"
+        f"┌ Баланс: <b>{_fmt_usd(stats['balance'])}</b>\n"
+        f"├ Депозитов: <b>{_fmt_usd(stats['deposits'])}</b>\n"
+        f"└ Выводов: <b>{_fmt_usd(stats['withdrawals'])}</b>\n\n"
+        "<i>«деп 10» — пополнить сразу на 10$ · «нк 0.5» ответом на "
+        "сообщение — передать деньги игроку.</i>"
+    )
+    await message.answer(text, reply_markup=_balance_keyboard())
+
+
+def _display_name(user) -> str:
+    name = (user.full_name or "").strip()
+    if name:
+        return name
+    if user.username:
+        return f"@{user.username}"
+    return str(user.id)
+
+
+@router.message(F.text.regexp(_DEPOSIT_RE))
+async def deposit_quick_command(message: Message, state: FSMContext) -> None:
+    match = _DEPOSIT_RE.match(message.text or "")
+    amount_raw = match.group("amount") if match else None
+    await state.clear()
+
+    if not amount_raw:
+        # Без суммы — обычный экран выбора способа оплаты (как кнопка «Пополнить»).
+        await message.answer(
+            f"{DEPOSIT_ICON} <b>Пополнение баланса</b>\n\n"
+            "<i>Выберите способ оплаты. Счёт создаётся автоматически, "
+            "баланс пополнится сразу после оплаты.\n\n"
+            "Подсказка: можно сразу написать «деп 10» — счета создадутся "
+            "на обоих способах одновременно.</i>",
+            reply_markup=_methods_keyboard(),
+        )
+        return
+
+    amount = round(float(amount_raw.replace(",", ".")), 2)
+    if not MIN_DEPOSIT_USD <= amount <= MAX_DEPOSIT_USD:
+        await message.answer(f"Сумма должна быть от {MIN_DEPOSIT_USD:g}$ до {MAX_DEPOSIT_USD:g}$.")
+        return
+
+    configured = [p for p in (cryptobot, xrocket) if p.configured]
+    if not configured:
+        await message.answer(
+            f"{DEPOSIT_ICON} <b>Пополнение временно недоступно</b>\n\n"
+            "<i>Оба способа оплаты сейчас отключены. Обратитесь в поддержку.</i>"
+        )
+        return
+
+    status = await message.answer(
+        f"{DEPOSIT_ICON} <b>Создаю счета на {_fmt_usd(amount)}…</b>\n"
+        "<i>Сейчас пришлю по одному счёту на каждый способ — "
+        "оплатите любой удобный, второй можно просто не трогать.</i>"
+    )
+    for provider in configured:
+        error = await _start_deposit(
+            message.bot, message.from_user.id, provider.key, amount, panel=None, chat_id=message.chat.id
+        )
+        if error:
+            await message.answer(f"{_provider_label(provider)}: {error}")
+    try:
+        await status.delete()
+    except Exception:
+        pass
+
+
+@router.message(F.text.regexp(_TRANSFER_RE))
+async def transfer_command(message: Message) -> None:
+    match = _TRANSFER_RE.match(message.text or "")
+    if not match:
+        return
+
+    reply = message.reply_to_message
+    if reply is None or reply.from_user is None:
+        await message.reply(
+            f"{EMOJI_TRANSFER} Чтобы передать деньги, ответьте командой «нк <сумма>» "
+            "на сообщение того, кому хотите перевести."
+        )
+        return
+
+    sender = message.from_user
+    recipient = reply.from_user
+    if recipient.is_bot:
+        await message.reply(f"{EMOJI_TRANSFER} Боту деньги не передать.")
+        return
+    if recipient.id == sender.id:
+        await message.reply(f"{EMOJI_TRANSFER} Нельзя перевести деньги самому себе.")
+        return
+
+    amount = round(float(match.group("amount").replace(",", ".")), 2)
+    if not MIN_TRANSFER_USD <= amount <= MAX_TRANSFER_USD:
+        await message.reply(f"Сумма должна быть от {MIN_TRANSFER_USD:g}$ до {MAX_TRANSFER_USD:g}$.")
+        return
+
+    balance = get_profile_stats(sender.id)["balance"]
+    if balance + 0.005 < amount:
+        await message.reply(f"Недостаточно средств. Доступно: <b>{_fmt_usd(balance)}</b>")
+        return
+
+    adjust_balance(sender.id, amount, TRANSFER_DEBIT_KIND)
+    adjust_balance(recipient.id, amount, TRANSFER_CREDIT_KIND)
+
+    sender_name = html.escape(_display_name(sender))
+    recipient_name = html.escape(_display_name(recipient))
+    new_balance = get_profile_stats(sender.id)["balance"]
+
+    await message.reply(
+        f"{EMOJI_TRANSFER} <b>Перевод выполнен</b>\n\n"
+        f"┌ От кого: <b>{sender_name}</b>\n"
+        f"├ Кому: <b>{recipient_name}</b>\n"
+        f"├ Сумма: <b>{_fmt_usd(amount)}</b>\n"
+        f"└ Ваш баланс: <b>{_fmt_usd(new_balance)}</b>"
+    )
+    try:
+        await message.bot.send_message(
+            recipient.id,
+            f"{EMOJI_TRANSFER} <b>Вам перевели деньги</b>\n\n"
+            f"┌ От кого: <b>{sender_name}</b>\n"
+            f"├ Сумма: <b>{_fmt_usd(amount)}</b>\n"
+            f"└ Ваш баланс: <b>{_fmt_usd(get_profile_stats(recipient.id)['balance'])}</b>",
+        )
+    except Exception:
+        pass
+
+
 class DepositStates(StatesGroup):
     waiting_amount = State()
 
