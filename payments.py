@@ -74,14 +74,12 @@ XROCKET_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhcHBJZCI6IjMwMDgzMiIsIm
 CRYPTOBOT_TESTNET = False
 XROCKET_TESTNET = False
 
-MIN_DEPOSIT_USD = 1.1
+MIN_DEPOSIT_USD = 0.1
 MAX_DEPOSIT_USD = 10000.0
 QUICK_AMOUNTS = (2, 5, 10, 25, 50, 100)
 
 # --- Вывод средств ---
-# Вывод открывается только после пополнения минимум на эту сумму (защита от ботов и «халявщиков»).
-MIN_DEPOSIT_TO_WITHDRAW_USD = 1.1
-MIN_WITHDRAW_USD = 1.0
+MIN_WITHDRAW_USD = 0.1
 MAX_WITHDRAW_USD = 10000.0
 WITHDRAW_QUICK_AMOUNTS = (5, 10, 25, 50, 100)
 WITHDRAW_ASSET = "USDT"                # в чём отправляем (1 USDT ≈ 1 USD)
@@ -522,15 +520,6 @@ def _db_pending(provider: str | None = None) -> list[sqlite3.Row]:
         return conn.execute(query + " ORDER BY last_check ASC, id ASC", args).fetchall()
 
 
-def _db_total_deposited(user_id: int) -> float:
-    """Сколько игрок реально пополнил (только оплаченные счета)."""
-    with closing(_conn()) as conn:
-        row = conn.execute(
-            "SELECT COALESCE(SUM(amount), 0) FROM deposits WHERE user_id = ? AND status = 'paid'", (user_id,)
-        ).fetchone()
-        return float(row[0])
-
-
 def _db_set_message(dep_id: int, chat_id: int, message_id: int) -> None:
     with closing(_conn()) as conn, conn:
         conn.execute("UPDATE deposits SET chat_id = ?, message_id = ? WHERE id = ?", (chat_id, message_id, dep_id))
@@ -736,25 +725,6 @@ def _paid_text(provider: CryptoBotClient | XRocketClient, user_id: int, amount: 
     )
 
 
-async def _deposit_requirement_error(user_id: int) -> str | None:
-    """Текст ошибки, если игрок ещё не пополнял баланс на минимальную сумму (иначе None)."""
-    if await _run(_db_total_deposited, user_id) + 0.005 < MIN_DEPOSIT_TO_WITHDRAW_USD:
-        return (
-            f"Вывод недоступен: сначала пополните баланс минимум на {MIN_DEPOSIT_TO_WITHDRAW_USD:g}$. "
-            "Это защита от ботов и злоупотреблений."
-        )
-    return None
-
-
-async def _deposit_gate_error(user_id: int) -> str | None:
-    """То же, но сбой проверки тоже превращается в «обратитесь в поддержку»."""
-    try:
-        return await _deposit_requirement_error(user_id)
-    except Exception:
-        log.exception("[withdraw] не удалось проверить депозиты user=%s", user_id)
-        return f"Ошибка. Обратитесь в поддержку: {SUPPORT_HANDLE}"
-
-
 async def _alert_admins(bot: Bot, text: str) -> None:
     """Сообщаем админам о сбое вывода (текст — уже безопасный HTML)."""
     for admin_id in ALERT_ADMIN_IDS:
@@ -831,14 +801,6 @@ async def _execute_withdrawal(bot: Bot, user_id: int, provider_key: str, amount:
         return _rejected(f"{provider.title} временно недоступен")
     if not MIN_WITHDRAW_USD <= amount <= MAX_WITHDRAW_USD:
         return _rejected(f"Сумма вывода должна быть от {MIN_WITHDRAW_USD:g}$ до {MAX_WITHDRAW_USD:g}$")
-
-    try:
-        deposit_error = await _deposit_requirement_error(user_id)
-    except Exception:
-        log.exception("[withdraw] не удалось проверить депозиты user=%s", user_id)
-        return WithdrawResult("failed", _error_text("Не удалось выполнить вывод", None))
-    if deposit_error:
-        return _rejected(deposit_error)
 
     lock = _wd_locks.setdefault(user_id, asyncio.Lock())
     if lock.locked():
@@ -1567,7 +1529,7 @@ async def withdraw_amount_chosen(callback: CallbackQuery, state: FSMContext) -> 
     if provider is None:
         await callback.answer("Неизвестный способ", show_alert=True)
         return
-    error = _amount_error(callback.from_user.id, amount) or await _deposit_gate_error(callback.from_user.id)
+    error = _amount_error(callback.from_user.id, amount)
     if error:
         await callback.answer(error, show_alert=True)
         return
@@ -1595,12 +1557,6 @@ async def withdraw_amount_message(message: Message, state: FSMContext) -> None:
     error = _amount_error(message.from_user.id, amount)
     if error:
         await message.answer(error)  # сумма неверная — даём ввести заново
-        return
-
-    error = await _deposit_gate_error(message.from_user.id)
-    if error:
-        await state.clear()  # пополнить нужно в любом случае — режим ввода суммы закрываем
-        await message.answer(error)
         return
 
     await state.clear()
