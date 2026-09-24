@@ -1,4 +1,4 @@
-"""о
+"""
 payments.py — пополнение баланса через CryptoBot (Crypto Pay API) и xRocket (Pay API)
 по схеме «создание счёта»:
 
