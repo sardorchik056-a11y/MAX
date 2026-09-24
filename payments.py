@@ -118,6 +118,8 @@ EMOJI_XROCKET = "5798534328698805312"      # 🚀 xRocket
 EMOJI_PAY = "5836907383292436018"          # 💎 кнопка «Оплатить»
 EMOJI_CHECK = "6039859895291877126"        # 💎 кнопка «Проверить оплату»
 EMOJI_WITHDRAW = "5890848474563352982"     # 🪙 как «Вывести» в профиле
+EMOJI_TREASURY = "5197288647275071607"     # 🛡 заголовок «Баланс казны»
+EMOJI_WAIT = "5386367538735104399"         # ⌛ «Запрашиваю баланс казны…»
 EMOJI_SUPPORT = "5812150667812280629"      # 🛠 как «Поддержка» в main.py
 
 log = logging.getLogger("payments")
@@ -1151,7 +1153,7 @@ async def _treasury_text() -> str:
     xr_items, xr_total, xr_err = await _xrocket_snapshot(rates_usd) if xrocket.configured else ([], None, None)
 
     parts = [
-        "🏦 <b>Баланс казны</b>",
+        f"{_tge(EMOJI_TREASURY, '🏦')} <b>Баланс казны</b>",
         "",
         _treasury_section(cryptobot, cb_items, cb_total, cb_err),
         "",
@@ -1173,12 +1175,12 @@ async def treasury_command(message: Message) -> None:
     # чтобы не палить сам факт существования команды.
     if message.from_user.id not in ALERT_ADMIN_IDS:
         return
-    status = await message.answer("🏦 Запрашиваю баланс казны…")
+    status = await message.answer(f"<i>{_tge(EMOJI_WAIT, '⌛')} Запрашиваю баланс казны…</i>")
     try:
         text = await _treasury_text()
     except Exception:
         log.exception("Не удалось получить баланс казны")
-        text = "🏦 <b>Баланс казны</b>\n\n⚠️ Не удалось получить данные, попробуйте ещё раз позже."
+        text = f"{_tge(EMOJI_TREASURY, '🏦')} <b>Баланс казны</b>\n\n⚠️ Не удалось получить данные, попробуйте ещё раз позже."
     try:
         await status.edit_text(text)
     except Exception:
