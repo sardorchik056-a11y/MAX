@@ -477,6 +477,16 @@ def _db_init() -> None:
             )
             """
         )
+        # group_id связывает два счёта (CryptoBot + xRocket), созданных одной
+        # командой «деп N» на одно сообщение: как только один из пары оплачен,
+        # второй сразу помечается 'expired', чтобы платёж по нему (если всё же
+        # придёт) не зачислился баланс повторно. Колонка могла отсутствовать
+        # в БД, созданной до этой фичи, — добавляем миграцией.
+        try:
+            conn.execute("ALTER TABLE deposits ADD COLUMN group_id TEXT")
+        except sqlite3.OperationalError:
+            pass
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_deposits_group ON deposits(group_id)")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS withdrawals (
@@ -495,12 +505,13 @@ def _db_init() -> None:
         )
 
 
-def _db_insert(provider: str, invoice_id: str, client_id: str, user_id: int, amount: float) -> int:
+def _db_insert(provider: str, invoice_id: str, client_id: str, user_id: int, amount: float,
+               group_id: str | None = None) -> int:
     with closing(_conn()) as conn, conn:
         cur = conn.execute(
-            "INSERT INTO deposits (provider, invoice_id, client_id, user_id, amount, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (provider, invoice_id, client_id, user_id, amount, time.time()),
+            "INSERT INTO deposits (provider, invoice_id, client_id, user_id, amount, created_at, group_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (provider, invoice_id, client_id, user_id, amount, time.time(), group_id),
         )
         return int(cur.lastrowid)
 
@@ -532,13 +543,25 @@ def _db_touch(dep_id: int) -> None:
 
 def _db_claim_paid(dep_id: int) -> bool:
     """Атомарно переводит pending -> paid. True получит только ОДИН вызывающий —
-    так кнопка «Проверить» и фоновая проверка не смогут зачислить счёт дважды."""
+    так кнопка «Проверить» и фоновая проверка не смогут зачислить счёт дважды.
+    Если счёт состоит в паре (group_id — два счёта на одну команду «деп N»),
+    второй счёт пары сразу помечается 'expired': это гарантирует, что даже
+    если игрок всё же оплатит и его, деньги не зачислятся повторно."""
     with closing(_conn()) as conn, conn:
         cur = conn.execute(
             "UPDATE deposits SET status = 'paid', paid_at = ? WHERE id = ? AND status = 'pending'",
             (time.time(), dep_id),
         )
-        return cur.rowcount == 1
+        claimed = cur.rowcount == 1
+        if claimed:
+            row = conn.execute("SELECT group_id FROM deposits WHERE id = ?", (dep_id,)).fetchone()
+            group_id = row["group_id"] if row else None
+            if group_id:
+                conn.execute(
+                    "UPDATE deposits SET status = 'expired' WHERE group_id = ? AND id != ? AND status = 'pending'",
+                    (group_id, dep_id),
+                )
+        return claimed
 
 
 def _db_mark_expired(dep_id: int) -> bool:
@@ -1222,6 +1245,31 @@ def _display_name(user) -> str:
     return str(user.id)
 
 
+def _combined_invoice_text(amount: float) -> str:
+    minutes = INVOICE_TTL_SECONDS // 60
+    return (
+        f"{DEPOSIT_ICON} <b>Счёт на пополнение создан</b>\n\n"
+        f"┌ Сумма: <b>{_fmt_usd(amount)}</b>\n"
+        f"└ Действует: <b>{minutes} мин</b>\n\n"
+        "<i>Выберите способ оплаты ниже — баланс пополнится автоматически, "
+        "как только оплатите любым из них. Проверка идёт в фоне сама, "
+        "кнопка «Проверить оплату» — если хотите ускорить.</i>"
+    )
+
+
+def _combined_invoice_keyboard(invoices: list[tuple[Any, int, str]]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"Оплатить · {provider.title}", url=pay_url, icon_custom_emoji_id=provider.emoji_id)]
+        for provider, _dep_id, pay_url in invoices
+    ]
+    ids = ":".join(str(dep_id) for _provider, dep_id, _pay_url in invoices)
+    rows.append(
+        [InlineKeyboardButton(text="Проверить оплату", callback_data=f"dep:cg:{ids}", icon_custom_emoji_id=EMOJI_CHECK)]
+    )
+    rows.append(_back_button("menu:profile"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 @router.message(F.text.regexp(_DEPOSIT_RE))
 async def deposit_quick_command(message: Message, state: FSMContext) -> None:
     match = _DEPOSIT_RE.match(message.text or "")
@@ -1234,8 +1282,8 @@ async def deposit_quick_command(message: Message, state: FSMContext) -> None:
             f"{DEPOSIT_ICON} <b>Пополнение баланса</b>\n\n"
             "<i>Выберите способ оплаты. Счёт создаётся автоматически, "
             "баланс пополнится сразу после оплаты.\n\n"
-            "Подсказка: можно сразу написать «деп 10» — счета создадутся "
-            "на обоих способах одновременно.</i>",
+            "Подсказка: можно сразу написать «деп 10» — пришлю один счёт "
+            "сразу с обоими способами оплаты.</i>",
             reply_markup=_methods_keyboard(),
         )
         return
@@ -1253,21 +1301,98 @@ async def deposit_quick_command(message: Message, state: FSMContext) -> None:
         )
         return
 
-    status = await message.answer(
-        f"{DEPOSIT_ICON} <b>Создаю счета на {_fmt_usd(amount)}…</b>\n"
-        "<i>Сейчас пришлю по одному счёту на каждый способ — "
-        "оплатите любой удобный, второй можно просто не трогать.</i>"
-    )
-    for provider in configured:
+    # Если доступен только один провайдер — обычный одиночный счёт, group_id не нужен.
+    if len(configured) == 1:
         error = await _start_deposit(
-            message.bot, message.from_user.id, provider.key, amount, panel=None, chat_id=message.chat.id
+            message.bot, message.from_user.id, configured[0].key, amount, panel=None, chat_id=message.chat.id
         )
         if error:
-            await message.answer(f"{_provider_label(provider)}: {error}")
+            await message.answer(error)
+        return
+
+    # Оба провайдера доступны — один счёт у каждого, но ОДНО общее сообщение
+    # с двумя кнопками «Оплатить» и одной кнопкой «Проверить оплату» сразу для
+    # обеих. group_id связывает пару: как только один оплачен, второй
+    # автоматически «гасится», чтобы не зачислить сумму дважды (см. _db_claim_paid).
+    group_id = uuid.uuid4().hex
+    invoices: list[tuple[Any, int, str]] = []
+    errors: list[str] = []
+    for provider in configured:
+        try:
+            dep_id, pay_url, _title = await _create_deposit(message.bot, message.from_user.id, provider.key, amount, group_id)
+        except PaymentError as ex:
+            log.warning("[deposit] не удалось создать счёт %s: %s", provider.key, ex)
+            errors.append(f"{provider.title}: не удалось создать счёт ({ex})")
+            continue
+        except Exception:
+            log.exception("[deposit] ошибка при создании счёта %s", provider.key)
+            errors.append(f"{provider.title}: не удалось создать счёт")
+            continue
+        invoices.append((provider, dep_id, pay_url))
+
+    if not invoices:
+        await message.answer(
+            "Не удалось создать счета, попробуйте позже." + ("\n" + "\n".join(errors) if errors else "")
+        )
+        return
+
+    sent = await message.answer(_combined_invoice_text(amount), reply_markup=_combined_invoice_keyboard(invoices))
+    for provider, dep_id, _pay_url in invoices:
+        await _run(_db_set_message, dep_id, sent.chat.id, sent.message_id)
+        if provider.key == xrocket.key:
+            _xr_wake.set()
+    if errors:
+        await message.answer("\n".join(errors))
+
+
+@router.callback_query(F.data.startswith("dep:cg:"))
+async def deposit_check_combined(callback: CallbackQuery) -> None:
+    """«Проверить оплату» для комбинированного счёта (dep:cg:id1:id2) — проверяет
+    оба счёта пары и применяет статус первого найденного оплаченным."""
     try:
-        await status.delete()
-    except Exception:
-        pass
+        dep_ids = [int(x) for x in callback.data.split(":")[2:] if x]
+    except ValueError:
+        await callback.answer("Некорректный запрос", show_alert=True)
+        return
+    if not dep_ids:
+        await callback.answer("Счёт не найден", show_alert=True)
+        return
+
+    rows = [await _run(_db_get, dep_id) for dep_id in dep_ids]
+    rows = [r for r in rows if r is not None and r["user_id"] == callback.from_user.id]
+    if not rows:
+        await callback.answer("Счёт не найден", show_alert=True)
+        return
+    if any(r["status"] == "paid" for r in rows):
+        await callback.answer("Этот счёт уже оплачен и зачислен", show_alert=True)
+        return
+
+    now = time.monotonic()
+    if now - _last_check_press.get(callback.from_user.id, 0) < CHECK_BUTTON_COOLDOWN_SECONDS:
+        await callback.answer("Подождите пару секунд…")
+        return
+    _last_check_press[callback.from_user.id] = now
+
+    found_paid = False
+    all_expired = True
+    for dep_id in dep_ids:
+        try:
+            status = await check_deposit(callback.bot, dep_id)
+        except PaymentError as ex:
+            await callback.answer(f"Не удалось проверить: {ex}", show_alert=True)
+            return
+        if status == "paid":
+            found_paid = True
+            break
+        if status != "expired":
+            all_expired = False
+
+    if found_paid:
+        await callback.answer("Оплата получена, баланс пополнен")
+    elif all_expired:
+        await callback.answer("Счета истекли, создайте новый", show_alert=True)
+    else:
+        await callback.answer("Оплата пока не найдена. Оплатите счёт и нажмите снова.", show_alert=True)
 
 
 @router.message(F.text.regexp(_TRANSFER_RE))
@@ -1404,13 +1529,15 @@ async def deposit_method_chosen(callback: CallbackQuery, state: FSMContext) -> N
     await callback.answer()
 
 
-async def _create_deposit(bot: Bot, user_id: int, provider_key: str, amount: float) -> tuple[int, str, str]:
-    """Создаёт счёт у провайдера и запись в БД. Возвращает (deposit_id, pay_url, provider_title)."""
+async def _create_deposit(bot: Bot, user_id: int, provider_key: str, amount: float,
+                           group_id: str | None = None) -> tuple[int, str, str]:
+    """Создаёт счёт у провайдера и запись в БД. Возвращает (deposit_id, pay_url, provider_title).
+    group_id — если счёт создаётся в паре с другим (см. deposit_quick_command)."""
     provider = PROVIDERS[provider_key]
     client_id = f"dep_{uuid.uuid4().hex}"
     invoice = await provider.create_invoice(amount, client_id, "Пополнение баланса")
     try:
-        dep_id = await _run(_db_insert, provider_key, invoice.invoice_id, client_id, user_id, amount)
+        dep_id = await _run(_db_insert, provider_key, invoice.invoice_id, client_id, user_id, amount, group_id)
     except Exception:
         # счёт уже создан у провайдера, а записать не вышло — оставляем след для ручной сверки
         log.error("[deposit] НЕ ЗАПИСАН счёт: provider=%s invoice=%s user=%s amount=%s",
