@@ -348,11 +348,12 @@ def get_profile_stats(user_id: int) -> dict[str, float]:
 # Начисление / списание баланса администратором
 # --------------------------------------------------------------------------
 # adjust_balance всегда принимает положительную сумму — знак определяется
-# по `reason`. Списывающие причины: "admin_deduct" (админ-панель main.py) и
-# "transfer_out" (команда «нк» в payments.py — перевод игроку); все остальные
-# причины (например, "admin_grant", "transfer_in") увеличивают баланс.
+# по `reason`. Списывающие причины: "admin_deduct" (админ-панель main.py),
+# "transfer_out" (команда «нк» в payments.py — перевод игроку) и "withdraw"
+# (вывод средств в payments.py — _debit_balance). Все остальные причины
+# (например, "admin_grant", "transfer_in") увеличивают баланс.
 
-_DEDUCT_REASONS = {"admin_deduct", "transfer_out"}
+_DEDUCT_REASONS = {"admin_deduct", "transfer_out", "withdraw"}
 
 
 def adjust_balance(user_id: int, amount: float, reason: str) -> float:
