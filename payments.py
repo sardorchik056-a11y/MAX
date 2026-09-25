@@ -1,4 +1,4 @@
-"""а
+"""
 payments.py — пополнение баланса через CryptoBot (Crypto Pay API) и xRocket (Pay API)
 по схеме «создание счёта»:
 
@@ -79,7 +79,7 @@ MAX_DEPOSIT_USD = 10000.0
 QUICK_AMOUNTS = (2, 5, 10, 25, 50, 100)
 
 # --- Вывод средств ---
-MIN_WITHDRAW_USD = 0.1
+MIN_WITHDRAW_USD = 1.1  # CryptoBot отклоняет transfer мельче ~1$ (AMOUNT_TOO_SMALL)
 MAX_WITHDRAW_USD = 10000.0
 WITHDRAW_QUICK_AMOUNTS = (5, 10, 25, 50, 100)
 WITHDRAW_ASSET = "USDT"                # в чём отправляем (1 USDT ≈ 1 USD)
@@ -1180,6 +1180,10 @@ async def treasury_command(message: Message) -> None:
 #                                    с суммой («деп 10»): сразу создать ДВА
 #                                    счёта на эту сумму — CryptoBot и xRocket,
 #                                    игрок оплачивает любой удобный;
+#   вывод / выведи / вывести      — без суммы: открыть раздел вывода;
+#                                    с суммой («вывод 2»): сразу спросить,
+#                                    КУДА вывести (CryptoBot / xRocket) —
+#                                    сумма уже зафиксирована, останется выбрать способ;
 #   нк <сумма>  (ответом на сообщение) — мгновенный перевод части своего
 #                                    баланса игроку, чьё сообщение зацитировано.
 # --------------------------------------------------------------------------
@@ -1193,6 +1197,13 @@ _BALANCE_RE = re.compile(
 DEPOSIT_TRIGGERS = ("депозит", "деп", "пополнить", "deposit", "dep")
 _DEPOSIT_RE = re.compile(
     r"^/?(?:" + "|".join(re.escape(t) for t in DEPOSIT_TRIGGERS) + r")(?:@\w+)?"
+    r"(?:[\s:]+(?P<amount>\d+(?:[.,]\d+)?))?\s*$",
+    re.IGNORECASE,
+)
+
+WITHDRAW_TRIGGERS = ("вывод", "выведи", "вывести", "withdraw")
+_WITHDRAW_RE = re.compile(
+    r"^/?(?:" + "|".join(re.escape(t) for t in WITHDRAW_TRIGGERS) + r")(?:@\w+)?"
     r"(?:[\s:]+(?P<amount>\d+(?:[.,]\d+)?))?\s*$",
     re.IGNORECASE,
 )
@@ -1340,6 +1351,64 @@ async def deposit_quick_command(message: Message, state: FSMContext) -> None:
             _xr_wake.set()
     if errors:
         await message.answer("\n".join(errors))
+
+
+def _wd_dest_keyboard(amount: float) -> InlineKeyboardMarkup:
+    cents = int(round(amount * 100))
+    rows = [
+        [InlineKeyboardButton(text=p.title, callback_data=f"wd:a:{p.key}:{cents}", icon_custom_emoji_id=p.emoji_id)]
+        for p in (cryptobot, xrocket)
+        if p.configured
+    ]
+    rows.append(_back_button("menu:profile"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.message(F.text.regexp(_WITHDRAW_RE))
+async def withdraw_quick_command(message: Message, state: FSMContext) -> None:
+    match = _WITHDRAW_RE.match(message.text or "")
+    amount_raw = match.group("amount") if match else None
+    await state.clear()
+
+    balance = _balance(message.from_user.id)
+
+    if not amount_raw:
+        # Без суммы — обычный экран выбора способа вывода (как кнопка «Вывести»).
+        if balance + 1e-9 < MIN_WITHDRAW_USD:
+            await message.answer(
+                f"Минимальная сумма вывода — {MIN_WITHDRAW_USD:g}$. Ваш баланс: {_fmt_usd(balance)}"
+            )
+            return
+        await message.answer(
+            f"{WITHDRAW_ICON} <b>Вывод средств</b>\n\n"
+            f"└ Доступно: <b>{_fmt_usd(balance)}</b>\n\n"
+            "<i>Выберите способ вывода. Средства придут в USDT на ваш аккаунт Telegram "
+            "в выбранном сервисе.\n\nПодсказка: можно сразу написать «вывод 2» — "
+            "останется только выбрать куда.</i>",
+            reply_markup=_wd_methods_keyboard(),
+        )
+        return
+
+    amount = round(float(amount_raw.replace(",", ".")), 2)
+    error = _amount_error(message.from_user.id, amount)
+    if error:
+        await message.answer(error)
+        return
+
+    configured = [p for p in (cryptobot, xrocket) if p.configured]
+    if not configured:
+        await message.answer(
+            f"{WITHDRAW_ICON} <b>Вывод временно недоступен</b>\n\n"
+            "<i>Оба способа вывода сейчас отключены. Обратитесь в поддержку.</i>"
+        )
+        return
+
+    await message.answer(
+        f"{WITHDRAW_ICON} <b>Вывод {_fmt_usd(amount)}</b>\n\n"
+        f"└ Доступно: <b>{_fmt_usd(balance)}</b>\n\n"
+        "<i>Выберите, куда вывести:</i>",
+        reply_markup=_wd_dest_keyboard(amount),
+    )
 
 
 @router.message(F.text.regexp(_TRANSFER_RE))
