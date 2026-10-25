@@ -25,7 +25,7 @@ from aiogram.types import (
 # --------------------------------------------------------------------------
 
 # Токен бота указан прямо в коде.
-BOT_TOKEN = "8867617327:AAGh7PGmp2DnCZaiA3KkpfLUu8ZZKFerb_8"
+BOT_TOKEN = "8712603440:AAGOxtvalNrzy_AhHPoiT-JlgRPDNVr1veA"
 
 # ID администраторов бота (Telegram user_id). Узнать свой ID можно, например,
 # у @userinfobot. Добавьте сюда ID всех, кому нужен доступ к админ-панели.
